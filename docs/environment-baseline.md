@@ -28,4 +28,4 @@ Linux x86_64 / Ubuntu 22.04（WSL2）；Clang/LLVM/LLD 19.1.7；Bazel 9.1.0；Py
 
 严格 F32 检查使用 NumPy 参考、`rtol=1e-5` 和 `atol=1e-6`。混合目标 VMFB 的运行器同时注册 local-task 与 coralnpu 设备，并检查 host 数值 dispatch 为 0。
 
-这些结果验证工具链与小规模运算，不代表 llama.cpp 的 Coral backend 已实现，也不代表真实硬件性能。原始构建和验证产物已清理；未来代码变更需重新执行对应测试。
+这些结果验证工具链与小规模运算，不代表 llama.cpp 的 Coral backend 已实现，也不代表真实硬件性能。这次历史基线的原始构建和验证产物曾被清理。后续 M1 已重新构建并保留产物与缓存，见 [M1 验证记录](m1-validation.md)；未来代码变更需重新执行对应测试。

@@ -10,3 +10,12 @@
 - PR 说明具体问题、最终行为、验证结果及尚未覆盖的范围。
 
 提交前检查 `git diff --cached --check` 和 `git diff --cached`，确认待提交内容中没有本机信息或生成文件。GitHub 仓库创建后，维护者应启用 secret scanning 和 push protection。
+
+## Local build artifacts
+
+Keep local build outputs and dependency caches for incremental builds. Do not
+remove them unless explicitly requested. They remain excluded from Git; source
+cleanup for publication must not delete the local development environment.
+
+When a local env.sh exists, source it before building so the same tool paths
+and Bazel cache configuration are reused across terminal sessions.

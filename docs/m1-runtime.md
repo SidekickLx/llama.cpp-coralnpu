@@ -3,8 +3,10 @@
 ## 状态与阅读顺序
 
 本分支提供 M1 runner、C++ 适配层、StableHLO 导出器和构建描述。
-**本轮仅实现源码并做静态审查，尚未配置构建、编译或运行新代码。**
-下文命令是后续验证步骤，不代表已经执行成功。M1 运行验收尚未完成。
+2026-11-16 已完成 CMake 配置、编译、链接和 MPACT 实际运行验证：
+六组 Zvt/RVV 配置共 114 次数值调用及 11 组拒绝用例通过。
+详细结果见 [M1 验证记录](m1-validation.md)。
+设备内部 staging 和完整分配统计仍待补充，尚未完成 M1 计划中的全部观测任务。
 
 本实现针对 dependencies.lock.json 中的固定版本，仅支持 Linux x86_64
 （包括 WSL2）与 MPACT。复用 IREE/Coral C API，不修改上游，不实现新 kernel。
@@ -15,7 +17,7 @@
 2. [matmul_runner.cc](../src/runtime/matmul_runner.cc)：命令行、CPU 参考和用例。
 3. [matmul_runtime.cc](../src/runtime/matmul_runtime.cc)：资源、设备和模块调用。
 4. [export_matmul.py](../compiler/export_matmul.py)：生成 StableHLO。
-5. [CMakeLists.txt](../CMakeLists.txt)：未来构建入口及可选 CTest 注册。
+5. [CMakeLists.txt](../CMakeLists.txt)：构建入口及可选 CTest 注册。
 
 ## Tensor ABI
 
@@ -31,8 +33,8 @@ Y[m,n] = sum_k X[m,k] * W[n,k]
 
 矩阵必须连续、无广播，元素步长为 4 字节、行步长为列数乘 4。
 维度大于零，每个张量不得超过 2^31-1 字节；这是 RV32 的保守地址边界，
-不代表设备拥有这么多 TCM。默认 8 KiB ITCM / 32 KiB DTCM 下的实际可编译范围
-仍需验证。首批 (M,K,N) 为 (1,16,8)、(16,16,8)、(32,16,8)。
+不代表设备拥有这么多 TCM。默认 8 KiB ITCM / 32 KiB DTCM 下已验证首批 (M,K,N)：
+(1,16,8)、(16,16,8)、(32,16,8)；更大 shape 的可编译范围仍需单独验证。
 
 参数顺序固定为 X、W；未来 GGML adapter 将 src[1] 映射到 X、src[0] 映射到 W。
 权重数值作为运行时参数，不固化到 MLIR/VMFB。
@@ -114,18 +116,25 @@ host_numerical_execution=disabled 表示执行策略，不是伪造的实测 dis
 权重快照复用也不等于已证明权重常驻真实 NPU。
 设备内部 staging 和完整 allocator 统计仍待深化。
 
-## 后续构建步骤：尚未执行
+## 增量构建
 
 在项目根目录记录路径，然后按固定版本官方说明构建依赖。
-之前构建产物已清理，此步骤可能重新下载 Bazel 依赖并长时间编译。
+首次构建编译器较慢。保留 build/、.cache/、Bazel 输出和依赖工具环境，
+以后在相同目录增量构建；不要运行 clean 或删除缓存。这些本机产物由 Git 忽略。
 
 ```bash
+set -euo pipefail
+# Reuse the local tool paths and Bazel cache configuration when available.
+if [ -f ./env.sh ]; then
+    source ./env.sh
+fi
 PROJECT_ROOT="$PWD"
 CORAL_SOURCE="$PROJECT_ROOT/repos/coralnpu-compiler"
 cd "$CORAL_SOURCE"
 bazel build --config=dev \
     @iree_core//tools:iree-compile \
     @coralnpu_mpact//sim/hw_sim:libcoralnpu_simulator_mpact.so
+MPACT_LIB="$(bazel info --config=dev bazel-bin)/external/coralnpu_mpact+/sim/hw_sim/libcoralnpu_simulator_mpact.so"
 cd "$PROJECT_ROOT"
 ```
 
@@ -142,45 +151,75 @@ cmake --build "$PROJECT_ROOT/build/m1" --target coral-matmul-runner -j 4
 
 入口仅引入 IREE runtime，不调用 Coral 顶层 CMake 的 compiler/CRT 构建。
 必须提供已有的 MPACT .so；否则配置立即报错，避免上游插件在配置阶段自动启动 Bazel。
-此接入尚未经配置或链接验证。
+后续修改本项目 C++ 文件时，只需再次执行上述 cmake --build 命令。
 
-## 后续产物生成与运行：尚未执行
+## 产物生成与运行
 
 导出器直接写 StableHLO，不依赖 JAX/PyTorch，不编译或执行模型。
-输出文件必须不存在：
+以下命令首次生成六组测试产物；导出文件必须不存在。
+已有同版本产物时直接运行后面的验证命令。修改导出器或编译参数后，
+使用新的 ARTIFACT_DIR 保存另一组产物，保留旧结果。
 
 ```bash
-mkdir -p "$PROJECT_ROOT/build/m1/artifacts"
-python3 "$PROJECT_ROOT/compiler/export_matmul.py" \
-    --m 1 --k 16 --n 8 \
-    --output "$PROJECT_ROOT/build/m1/artifacts/m1.mlir"
+ARTIFACT_DIR="$PROJECT_ROOT/build/m1-artifacts"
+mkdir -p "$ARTIFACT_DIR"
+for m in 1 16 32; do
+    python3 "$PROJECT_ROOT/compiler/export_matmul.py" \
+        --m "$m" --k 16 --n 8 --output "$ARTIFACT_DIR/m${m}.mlir"
+done
+
 cd "$CORAL_SOURCE"
+COMMON_FLAGS=(
+    --iree-input-type=stablehlo
+    --iree-execution-model=async-internal
+    --iree-hal-target-device=local
+    --iree-hal-local-target-device-backends=llvm-cpu
+    --iree-llvmcpu-target-cpu=host
+)
+CORAL_FLAGS=(
+    --iree-hal-target-device=coralnpu
+    --coralnpu-fast-math=false
+    --coralnpu-roofline-speedup-threshold=0
+    --coralnpu-dump-affinity-profile-format=pretty
+)
+RVV_FEATURES="+m,+f,+zbb,+zvl128b,+zve32f,+zfbfmin,+zvfbfmin,+zvfbfwma"
+for target in zvt rvv; do
+    EXTRA_FLAGS=()
+    if [ "$target" = rvv ]; then
+        EXTRA_FLAGS+=("--coralnpu-target-cpu-features=$RVV_FEATURES")
+    fi
+    for m in 1 16 32; do
+        bazel run --config=dev @iree_core//tools:iree-compile -- \
+            "$ARTIFACT_DIR/m${m}.mlir" \
+            "${COMMON_FLAGS[@]}" "${CORAL_FLAGS[@]}" "${EXTRA_FLAGS[@]}" \
+            -o "$ARTIFACT_DIR/m${m}_${target}.vmfb"
+    done
+done
+
+# Negative fixtures: a host numerical kernel and a module without our ABI tag.
+# The compiler does not automatically discover version-suffixed LLD binaries.
+HOST_LINKER="$(command -v ld.lld-19)"
 bazel run --config=dev @iree_core//tools:iree-compile -- \
-    "$PROJECT_ROOT/build/m1/artifacts/m1.mlir" \
-    --iree-input-type=stablehlo \
-    --iree-execution-model=async-internal \
-    --iree-hal-target-device=local \
-    --iree-hal-local-target-device-backends=llvm-cpu \
-    --iree-llvmcpu-target-cpu=host \
-    --iree-hal-target-device=coralnpu \
-    --coralnpu-fast-math=false \
-    --coralnpu-roofline-speedup-threshold=0 \
-    --coralnpu-dump-affinity-profile-format=pretty \
-    -o "$PROJECT_ROOT/build/m1/artifacts/m1_zvt.vmfb"
+    "$ARTIFACT_DIR/m1.mlir" "${COMMON_FLAGS[@]}" \
+    --iree-llvmcpu-embedded-linker-path="$HOST_LINKER" \
+    -o "$ARTIFACT_DIR/m1_host.vmfb"
+sed '/attributes {iree.reflection =/c\      {' \
+    "$ARTIFACT_DIR/m1.mlir" > "$ARTIFACT_DIR/m1_noabi.mlir"
+bazel run --config=dev @iree_core//tools:iree-compile -- \
+    "$ARTIFACT_DIR/m1_noabi.mlir" "${COMMON_FLAGS[@]}" \
+    --iree-llvmcpu-embedded-linker-path="$HOST_LINKER" \
+    -o "$ARTIFACT_DIR/m1_noabi.vmfb"
 cd "$PROJECT_ROOT"
 ```
 
-这是允许 Zvt 的配置；RVV-only 使用不同输出文件名，并增加：
-
-```text
---coralnpu-target-cpu-features=+m,+f,+zbb,+zvl128b,+zve32f,+zfbfmin,+zvfbfmin,+zvfbfwma
-```
+zvt 表示允许 Zvt 的配置，并不保证每个 shape 都采用矩阵指令。
+RVV-only 显式使用上述 CPU features。M=1 使用 RVV 仍是有效 Coral offload。
 
 async-internal 保留完整 HAL 调度，导出的函数接口仍同步接收两个 tensor 并返回一个。
 
 ```bash
 "$PROJECT_ROOT/build/m1/coral-matmul-runner" \
-    --module "$PROJECT_ROOT/build/m1/artifacts/m1_zvt.vmfb" \
+    --module "$ARTIFACT_DIR/m1_zvt.vmfb" \
     --m 1 --k 16 --n 8 --repeat 3 --recreate 2 --self-test
 ```
 
@@ -201,11 +240,28 @@ async-internal 保留完整 HAL 调度，导出的函数接口仍同步接收两
 即可注册相应 CTest。必须提供已有 VMFB，CMake 不会自动生成。
 Zvt/RVV 两套产物分别验收。
 
-## 待实际验收
+## 批量验证
 
-- [ ] CMake 配置与 C++ 编译、链接。
-- [ ] 三种 M 的 Zvt/RVV 严格 F32 数值和真实执行证据。
-- [ ] 重复调用、换权重、快照隔离与反复创建释放。
-- [ ] 错误 ABI、shape、stride、损坏 VMFB 明确失败。
-- [ ] 人为放在 host 的数值 kernel 被拒绝。
+生成上述八个 VMFB 后运行：
+
+```bash
+python3 tests/runtime/verify_m1.py \
+    --runner build/m1/coral-matmul-runner \
+    --artifacts "$ARTIFACT_DIR" \
+    --work-dir build/m1-results
+```
+
+脚本不触发构建。六组配置各执行两轮 context 重建、自测和独立随机 F32
+文件验算；再检查错误 shape/export、损坏或缺失 VMFB、非法参数/输入、
+禁止覆盖已有输出、缺失 ABI 标记和 host kernel 拒绝。
+每个 runner 进程限时 180 秒；stdout、stderr 和结果保存在新的
+build/m1-results/verification-* 目录，包括失败日志，供后续诊断。
+
+## 验收进度
+
+- [x] CMake 配置与 C++ 编译、链接。
+- [x] 三种 M 的 Zvt/RVV 严格 F32 数值和真实执行证据。
+- [x] 重复调用、换权重、快照隔离与反复创建释放。
+- [x] 错误 ABI、shape、stride、损坏 VMFB 明确失败。
+- [x] 人为放在 host 的数值 kernel 被拒绝。
 - [ ] 补充设备内部 staging/分配观测，完成 M1 全部统计。
