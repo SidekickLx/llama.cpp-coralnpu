@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-项目处于工程规划和环境基线阶段。GGML Coral backend、完整模型 NPU 推理、FFN/JIT/W4A8 和 Linux driver 尚待实现。详细范围见[工程实践计划](docs/project-plan.md)。
+项目已开始 M1 独立 runtime 的源码实现；新代码尚未编译或运行验收。GGML Coral backend、完整模型 NPU 推理、FFN/JIT/W4A8 和 Linux driver 尚待实现。详细范围见[工程实践计划](docs/project-plan.md)。
 
 已完成一次 CPU 模型、官方 matmul、严格 F32/MPACT 和 Renode 系统示例验证，摘要见[环境基线](docs/environment-baseline.md)。构建缓存、可执行文件及本机测试产物已清理，使用时需要重新构建。
 
@@ -14,6 +14,10 @@
 - `docs/environment-baseline.md`：工具版本与历史验证摘要。
 - `dependencies.lock.json`：公开上游地址、固定 revision、补丁及模型校验值。
 - `CONTRIBUTING.md`：贡献约定。
+- src/runtime/：M1 C++ runtime 适配层与命令行 runner。
+- compiler/export_matmul.py：导出固定 shape 的 F32 StableHLO matmul。
+- docs/m1-runtime.md：tensor ABI、生命周期、统计口径与待执行验证步骤。
+- CMakeLists.txt：runtime 构建入口（本轮未执行配置或编译）。
 
 `repos/` 用于本机上游源码副本，`tools/` 和 `.venv/` 用于本机工具环境；这些目录由 `.gitignore` 排除，不属于本仓库的发布内容。
 
@@ -24,7 +28,7 @@
 3. 按[固定版本的官方构建说明](https://github.com/google-coral/coralnpu-compiler/blob/770dc9332dffed8ff91d8cface7e9d176227d912/README.md)构建编译器、运行时及 matmul 示例。使用 `--config=dev`，按本机资源选择并行度。
 4. 先验证官方 Zvt/RVV matmul；严格 F32 检查显式设置 `--coralnpu-fast-math=false`。之后按工程计划实现后端。
 
-此仓库目前不提供独立可安装的后端或一键构建入口。
+M1 源码的使用方式及未完成验收见 [M1 runner 说明](docs/m1-runtime.md)。此仓库目前不提供独立可安装的 GGML 后端。
 
 ## 许可证
 
