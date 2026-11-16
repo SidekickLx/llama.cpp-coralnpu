@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "dependency_root": "coralnpu-compiler",
+  "repositories": {
+    "coralnpu-compiler": {
+      "url": "https://github.com/google-coral/coralnpu-compiler.git",
+      "revision": "770dc9332dffed8ff91d8cface7e9d176227d912"
+    },
+    "llama.cpp": {
+      "url": "https://github.com/ggml-org/llama.cpp.git",
+      "revision": "9fba51d2c9a1b5cb5f0c47986c031334e2d7663a"
+    },
+    "coralnpu-mpact": {
+      "url": "https://github.com/google-coral/coralnpu-mpact.git",
+      "revision": "704b28ce126debd2d951f9c3b36704080d75dc60"
+    },
+    "coralnpu": {
+      "url": "https://github.com/google-coral/coralnpu",
+      "revision": "1aeb3f46c3f56b00d277a5285da7f6c7cf801ab4"
+    },
+    "iree": {
+      "url": "https://github.com/iree-org/iree.git",
+      "revision": "89ece87b89852100c0a4ac3d515e14842d090967"
+    },
+    "llvm-project": {
+      "url": "https://github.com/iree-org/llvm-project",
+      "revision": "32d702efa29d0fdd02cff7b79dea8fdbbcf059d4"
+    },
+    "renode": {
+      "url": "https://github.com/renode/renode.git",
+      "revision": "ab721d88e135a1bcb8ed2ecc5a38f51cbe61fdd2"
+    }
+  },
+  "bazel_git_overrides": {
+    "hedron_compile_commands": "abb61a688167623088f8768cc9264798df6a9d10",
+    "mpact-sim": "9436377658889cd678101931f62ddba8a4d17b6d",
+    "mpact-riscv": "4262467a57837aa5de0a6283340868dd06d1dfe7",
+    "coralnpu_mpact": "704b28ce126debd2d951f9c3b36704080d75dc60"
+  },
+  "upstream_patch_sha256": {
+    "coralnpu-mpact-0001-vme-m4-decoder.patch": "214f55cd8d314fabeaa3442a3f88578f9a2508676758677674acbede7788e0b5",
+    "coralnpu-mpact-0002-vfmerge-vf-frs1.patch": "2c43ed0fa4e07855fac8090c93a2df6d439540fb2f75a4a0b20c9e986d8059ea",
+    "hedron-compile-commands-0001-resolve-workspace-symlinks.patch": "871ad2074c6a0f85462a8bcd94ab24464d14686e82187ef1052050cdb4c21266",
+    "iree-0001-bazel-fix-bazel-when-used-as-submodule.patch": "5e39df6f3f2d6beb7c3e4582ff6eaedc0d94c31f483afe376da1cec7ae1b5e51",
+    "iree-0002-bazel-add-support-for-out-of-tree-plugins.patch": "c4b4485d7c022c115bc10423639622397c9f048bad406403038d2147a0cc44cc",
+    "iree-0003-fix-iree-compile-for-jax-when-used-as-submodule.patch": "4a60c50cd243204e8e651ee08d830c7df8e6771b1c1381906585e97cfe73ff11",
+    "iree-0004-bazel-add-support-for-out-of-tree-drivers.patch": "d9a55c56ffbc21091039cc27afdb882f332c5faf127dca2c75dde7ecc5cfcb66",
+    "iree-0005-bazel-add-python-binding-support.patch": "1978fe4ae34a22b6b3a7ed045d90eb36cbac54b66dd5ba2ffb4855d0c7067a98",
+    "iree-0006-llvmcpu-add-beforelowertollvmhook.patch": "d2d6188c19e6aa66a170bc12c657be64143ea2a0ff6b4d096291a07a825c6dc4",
+    "iree-0007-cmake-allow-custom-bundled-llvm-project-path.patch": "e48def5279973d87156da869a7a3346e77bc2790bc936eba83eb3a7c37b9f045",
+    "iree-0008-llvmcpu-canonicalize-after-concretizing-pad.patch": "317b852c84bd608b9de7dcb9256bfa97baefd120daba2120ae9ae7f981d747ee",
+    "iree-0009-codegen-only-link-exclusively-owned-executables.patch": "7d0601d0cf56bdee4facbf8c88fdf1ea869541789f15335e0cbe2d8599440cab",
+    "iree-0010-pluginapi-add-pipeline-extension-hooks.patch": "8f358a0e7c67eb6989afc28266c16209297bff5f9bd5f905dc2f2962342ec625",
+    "iree-0011-llvmcpu-riscv-register-space.patch": "50ff78042f8d4e180d58b1889412e4d6d149a13e0dc1e7eab6bbcba8027eae3f",
+    "iree-0012-llvmcpu-matmul-batch-vector-sizes.patch": "119687c5db592ec6a1cd9ac08a0fe316ee889d7bab6875867d7a023f364cc8d3",
+    "iree-0013-codegen-cpu-allocate-workgroup-local-memory.patch": "df927cc2b2164599efab8e55f9020fcabc4096e34392228d2d3688c029b52b06",
+    "iree-0014-llvmcpu-add-after-cache-tiling-hook.patch": "2c44cb23078c81511762e856f743c91d2dae965fba80b65d71b8c6edb7def783",
+    "iree-0015-llvmcpu-peel-outer-loops-first.patch": "9736bb178227247f2412a24ab824a5c3bf76d2e3108a868c955f1f443e854a5f",
+    "llvm-project-0001-add-zvt-support.patch": "3d7e539f18b433d0e59abc896c65a67ce60910bad98f28549d3447f1a156d647",
+    "llvm-project-0002-tosa-fold-constant-conv2d-kernel-transpose.patch": "2c8f67bd7ca2d59b3d98d923efe2aafc007110128d1c2a88d23c20cdb6e0b2f9",
+    "llvm-project-0003-riscv-sink-extends-of-wide-vector-muls.patch": "b9e04e360a889b14339c9ddd6041a01f9397170847119bd641dda1d4ed7c1fd2",
+    "llvm-project-0004-tosa-clamp-arithmetic-right-shift.patch": "44ee37c8770c420a8a21dd7474a273039eb28026c904fcc75cba0b7727384419",
+    "mpact-riscv-0001-speed-up-emulation.patch": "4debf090b2345bb1339172037157d0e966cd9f643fdab4dc47fb621eb2d57fcc",
+    "mpact-riscv-0002-round-vector-fp-to-int-converts.patch": "5ffe0b511bb59b4b063c0620623f9ee47abf1c2fa32ef681d997b04fdc941915",
+    "mpact-riscv-0003-zvt-bf16-rounding.patch": "d57dda2a8e7653fe808fb83467921fab36b8df9093a89e5920e2cf1a389da661",
+    "mpact-riscv-0005-zvt-i16-matmul.patch": "c6fc30938534d07efe60ab7bb0620d26f1d0f295e26181c28923804465cce6ad",
+    "riscv-isa-sim-0001-zvt-mstatus-ms-initial.patch": "463ceb676c72dd64bd9a645b4d40464667d989becb0f1696e0a53fe215b82404",
+    "riscv-isa-sim-0002-zvt-i16-matmul.patch": "dfb39a3718259d082970a81d11d00093b9abdfee45173fec286939bafde6c4bc"
+  },
+  "model": {
+    "repo": "ggml-org/test-model-stories260K",
+    "revision": "479896ec924af6d40fd419ab8f4d1eb2101de00d",
+    "file": "stories260K-f32.gguf",
+    "sha256": "270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d",
+    "bytes": 1185376
+  },
+  "target_profile": {
+    "name": "upstream-default-tcm",
+    "simulator": "MPACT",
+    "itcm_bytes": 8192,
+    "dtcm_bytes": 32768,
+    "fast_math_smoke": false,
+    "highmem": false,
+    "default_features": "+m,+f,+zbb,+zvl128b,+zve32f,+zfbfmin,+zvfbfmin,+zvfbfwma,+zvtbase,+zvt8e,+zvt16e,+zvti8i32mm,+zvtf16f32mm,+zvtf32f32mm",
+    "abi": "ilp32",
+    "rvv_smoke_features": "+m,+f,+zbb,+zvl128b,+zve32f,+zfbfmin,+zvfbfmin,+zvfbfwma"
+  },
+  "notes": [
+    "IREE, LLVM and CoralNPU follow the compiler submodule revisions and official patches.",
+    "MPACT-Sim and MPACT-RISC-V follow the compiler MODULE.bazel overrides.",
+    "The separate coralnpu-mpact checkout is a source reference, not a replacement for compiler-managed dependencies.",
+    "Upstream source and model assets retain their respective upstream licenses."
+  ]
+}
