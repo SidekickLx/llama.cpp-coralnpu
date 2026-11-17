@@ -19,7 +19,8 @@ set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_REPACK OFF CACHE BOOL "" FORCE)
 add_subdirectory("${LLAMA_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/llama" EXCLUDE_FROM_ALL)
 
-add_library(coral-ffn-planner STATIC "../planner/ggml_fusion.cc")
+add_library(coral-ffn-planner STATIC
+    "../planner/ggml_fusion.cc" "../planner/ggml_ffn_pattern.cc")
 target_include_directories(coral-ffn-planner PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_include_directories(coral-ffn-planner SYSTEM PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
 target_link_libraries(coral-ffn-planner PUBLIC ggml)

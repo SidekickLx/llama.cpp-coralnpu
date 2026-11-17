@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "planner/ggml_fusion.h"
+#include "planner/ggml_ffn_pattern.h"
 #include "ggml-backend-impl.h"
 #include "ggml-impl.h"
 #include <algorithm>
@@ -21,45 +22,6 @@ int Index(const ggml_cgraph &graph, const ggml_tensor *node) {
         }
     }
     return -1;
-}
-bool IsSilu(const ggml_tensor *node) {
-    return node && node->op == GGML_OP_UNARY && node->op_params[0] == GGML_UNARY_OP_SILU;
-}
-struct Pattern {
-    FFNPattern kind;
-    const ggml_tensor *x, *gate, *up, *silu, *hidden, *down;
-};
-std::optional<Pattern> Match(const ggml_tensor *down) {
-    if (!down || down->op != GGML_OP_MUL_MAT || !down->src[0] || !down->src[1]) {
-        return {};
-    }
-    Pattern p{};
-    p.down = down;
-    p.hidden = down->src[1];
-    if (p.hidden->op == GGML_OP_GLU && p.hidden->op_params[0] == GGML_GLU_OP_SWIGLU) {
-        p.kind = FFNPattern::SplitSwiGlu;
-        p.gate = p.hidden->src[0];
-        p.up = p.hidden->src[1];
-    } else if (p.hidden->op == GGML_OP_MUL) {
-        p.kind = FFNPattern::SiluMultiply;
-        const bool left = IsSilu(p.hidden->src[0]);
-        const bool right = IsSilu(p.hidden->src[1]);
-        if (left == right) {
-            return {};
-        }
-        p.silu = p.hidden->src[left ? 0 : 1];
-        p.gate = p.silu->src[0];
-        p.up = p.hidden->src[left ? 1 : 0];
-    } else {
-        return {};
-    }
-    if (!p.gate || !p.up || p.gate->op != GGML_OP_MUL_MAT ||
-        p.up->op != GGML_OP_MUL_MAT || !p.gate->src[0] || !p.up->src[0] ||
-        !p.gate->src[1] || p.gate->src[1] != p.up->src[1]) {
-        return {};
-    }
-    p.x = p.gate->src[1];
-    return p;
 }
 std::optional<RegionRejection> TensorCheck(const ggml_tensor *t) {
     if (!t || t->type != GGML_TYPE_F32) {
@@ -207,7 +169,7 @@ FFNCheckResult PlanFFN(const ggml_cgraph &split, int output_index,
     if (output_index < 0 || output_index >= split.n_nodes) {
         return Reject(Code::UnsupportedPattern, "invalid FFN anchor index");
     }
-    const auto match = Match(split.nodes[output_index]);
+    const auto match = MatchFFNPattern(split.nodes[output_index]);
     if (!match) {
         return std::monostate{};
     }

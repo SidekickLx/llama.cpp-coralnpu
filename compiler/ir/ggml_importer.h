@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "contracts/ffn_contract.h"
+#include <array>
 #include "ggml.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
@@ -24,6 +25,22 @@ struct GGMLImportRequest {
     llvm::ArrayRef<GGMLTensorRef> operations; // explicit topological order
     llvm::ArrayRef<GGMLTensorRef> outputs;    // explicit function result order
 };
+
+struct GGMLFFNImportRequest {
+    contracts::GraphSnapshotId graph;
+    contracts::FFNCompileSpec spec;
+    // Fixed role order: X, gate weight, up weight, down weight. Repeated weight
+    // identities are allowed but keep distinct positional function arguments.
+    std::array<GGMLTensorRef, 4> inputs;
+    llvm::ArrayRef<GGMLTensorRef> operations;
+    GGMLTensorRef output;
+};
+
+// Imports the complete selected region with the fixed FFN signature and
+// explicit semantic-role metadata. Reuses the per-op importer and verifier.
+// It does not grant runtime/fusion authority or inspect physical storage.
+mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFFNFunction(
+    mlir::MLIRContext &context, const GGMLFFNImportRequest &request);
 
 // Rejects unadmitted layouts/types without reading data or calling GGML kernels.
 mlir::FailureOr<mlir::RankedTensorType> ImportGGMLTensorType(

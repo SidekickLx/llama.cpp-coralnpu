@@ -24,3 +24,12 @@ cc_library(
 )
 
 exports_files(["tests/compiler/importer_check.cc"])
+
+cc_library(
+    name = "ggml_ffn_pattern",
+    srcs = ["src/planner/ggml_ffn_pattern.cc"],
+    hdrs = ["src/planner/ggml_ffn_pattern.h", "src/planner/region_plan.h"],
+    includes = ["src"],
+    deps = [":contracts", ":ggml_headers"],
+    visibility = ["//visibility:public"],
+)

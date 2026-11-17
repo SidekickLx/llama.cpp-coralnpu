@@ -67,6 +67,7 @@ cc_library(
         "@stablehlo//:stablehlo_ops",
         ":stablehlo_program",
         "//:contracts",
+        "//:ggml_ffn_pattern",
         "//:ggml_headers",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",

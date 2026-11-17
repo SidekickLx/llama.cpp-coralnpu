@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "ggml_importer.h"
+#include "planner/ggml_ffn_pattern.h"
+#include <set>
 #include "stablehlo_ops.h"
 #include "stablehlo_program.h"
 #include "llvm/ADT/DenseMap.h"
@@ -164,8 +166,9 @@ mlir::FailureOr<mlir::Value> ImportGGMLNode(
     }
 }
 
-mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFunction(
-    mlir::MLIRContext &context, const GGMLImportRequest &request) {
+static mlir::OwningOpRef<mlir::ModuleOp> ImportFunction(
+    mlir::MLIRContext &context, const GGMLImportRequest &request,
+    const planner::GGMLFFNMatch *ffn) {
     RegisterDialects(context);
     mlir::OpBuilder builder(&context);
     const auto loc = builder.getUnknownLoc();
@@ -179,10 +182,14 @@ mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFunction(
     llvm::SmallVector<mlir::Type> input_types;
     llvm::SmallVector<mlir::Type> output_types;
     // Validate identity and layout before constructing any function.
-    for (const auto group : {request.inputs, request.operations}) {
+    for (int group_index = 0; group_index < 2; ++group_index) {
+        const auto group = group_index == 0 ? request.inputs : request.operations;
         for (const auto &ref : group) {
-            if (!ref.tensor || !ValidId(ref.id.value) || identities.count(ref.tensor) ||
-                ids.count(ref.id.value)) {
+            const auto existing = identities.find(ref.tensor);
+            const bool repeated_role = ffn && group_index == 0 && existing != identities.end() &&
+                                       existing->second == ref.id.value;
+            if (!ref.tensor || !ValidId(ref.id.value) ||
+                (!repeated_role && (existing != identities.end() || ids.count(ref.id.value)))) {
                 Reject(loc, "identity", "inputs/operations need unique nonzero tensor identities");
                 return {};
             }
@@ -210,6 +217,10 @@ mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFunction(
         loc, request.entry_point, builder.getFunctionType(input_types, output_types));
     function->setAttr("coral.ggml_graph_instance", builder.getI64IntegerAttr(request.graph.instance));
     function->setAttr("coral.ggml_graph_revision", builder.getI64IntegerAttr(request.graph.revision));
+    if (ffn) {
+        function->setAttr("coral.ffn_abi", builder.getStringAttr(contracts::kFFNAbi));
+        function->setAttr("coral.numeric_policy", builder.getStringAttr("f32_no_fast_math_v1"));
+    }
     module->push_back(function);
     auto *block = function.addEntryBlock();
     builder.setInsertionPointToEnd(block);
@@ -218,11 +229,24 @@ mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFunction(
         const auto &ref = request.inputs[i];
         values[ref.tensor] = block->getArgument(i);
         function.setArgAttr(i, "coral.ggml_tensor_id", builder.getI64IntegerAttr(ref.id.value));
+        if (ffn) {
+            const char *roles[] = {"activation", "gate_weight", "up_weight", "down_weight"};
+            function.setArgAttr(i, "coral.ffn_role", builder.getStringAttr(roles[i]));
+        }
     }
     for (const auto &ref : request.operations) {
         llvm::SmallVector<mlir::Value> operands;
-        for (auto *source : ref.tensor->src) {
+        for (int slot = 0; slot < GGML_MAX_SRC; ++slot) {
+            auto *source = ref.tensor->src[slot];
             if (!source) {
+                continue;
+            }
+            // Shared GGML weight identity does not collapse the FFN ABI.
+            // Select the weight argument by the verified consumer edge.
+            if (ffn && slot == 0 && ref.tensor->op == GGML_OP_MUL_MAT) {
+                const unsigned role = ref.tensor == ffn->gate ? 1 :
+                                      ref.tensor == ffn->up ? 2 : 3;
+                operands.push_back(block->getArgument(role));
                 continue;
             }
             const auto found = values.find(source);
@@ -260,4 +284,62 @@ mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFunction(
     }
     return module;
 }
+mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFunction(
+    mlir::MLIRContext &context, const GGMLImportRequest &request) {
+    return ImportFunction(context, request, nullptr);
+}
+
+mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFFNFunction(
+    mlir::MLIRContext &context, const GGMLFFNImportRequest &request) {
+    RegisterDialects(context);
+    const auto loc = mlir::UnknownLoc::get(&context);
+    const auto &spec = request.spec;
+    if (spec.contract_version != contracts::kFFNContractVersion ||
+        spec.numeric_policy != contracts::FFNNumericPolicy::F32NoFastMathV1 ||
+        spec.shape.m <= 0 || spec.shape.d <= 0 || spec.shape.f <= 0) {
+        Reject(loc, "ffn-contract", "unsupported FFN contract, numeric policy or dimensions");
+        return {};
+    }
+    const auto match = planner::MatchFFNPattern(request.output.tensor);
+    if (!match) {
+        Reject(loc, "ffn-pattern", "output must anchor a complete admitted FFN pattern");
+        return {};
+    }
+    const auto &p = *match;
+    const ggml_tensor *roles[] = {p.x, p.gate->src[0], p.up->src[0], p.down->src[0]};
+    for (std::size_t i = 0; i < request.inputs.size(); ++i) {
+        if (request.inputs[i].tensor != roles[i] ||
+            (i > 0 && (roles[i] == roles[0] || roles[i]->op != GGML_OP_NONE))) {
+            Reject(loc, "ffn-roles", "FFN arguments must preserve activation and leaf-weight roles");
+            return {};
+        }
+    }
+    if (p.x->ne[1] != spec.shape.m || p.x->ne[0] != spec.shape.d ||
+        roles[1]->ne[1] != spec.shape.f || roles[2]->ne[1] != spec.shape.f ||
+        roles[3]->ne[1] != spec.shape.d || roles[3]->ne[0] != spec.shape.f ||
+        p.down->ne[1] != spec.shape.m || p.down->ne[0] != spec.shape.d) {
+        Reject(loc, "ffn-contract", "selected region differs from the requested M/D/F shape");
+        return {};
+    }
+    std::set<const ggml_tensor *> expected{p.gate, p.up, p.hidden, p.down};
+    if (p.silu) {
+        expected.insert(p.silu);
+    }
+    const std::size_t count = p.silu ? 5 : 4;
+    if (expected.size() != count || request.operations.size() != count) {
+        Reject(loc, "ffn-members", "FFN members must be complete and distinct");
+        return {};
+    }
+    for (const auto &ref : request.operations) {
+        if (!expected.erase(ref.tensor)) {
+            Reject(loc, "ffn-members", "unexpected or repeated FFN member");
+            return {};
+        }
+    }
+    const GGMLImportRequest generic{
+        request.graph, contracts::kFFNEntryPoint, request.inputs,
+        request.operations, llvm::ArrayRef<GGMLTensorRef>(&request.output, 1)};
+    return ImportFunction(context, generic, &p);
+}
+
 } // namespace coral::compiler

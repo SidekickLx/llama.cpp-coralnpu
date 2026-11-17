@@ -99,25 +99,38 @@ struct Fixture {
     }
 
     void FFN(const std::string &name) {
-        auto *x = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, 3, 2);
-        auto *wg = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, 3, 4);
-        auto *wu = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, 3, 4);
-        auto *wd = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, 4, 3);
+        const bool region = name.find("region") != std::string::npos;
+        const bool tail = name.find("tail") != std::string::npos;
+        const bool shared = name.find("shared") != std::string::npos;
+        const bool expanded = name.find("expanded") != std::string::npos || (!region && name != "ffn-split");
+        const int64_t m = name.find("decode") != std::string::npos ? 1 :
+                          name.find("prefill") != std::string::npos ? 5 : tail ? 3 : 2;
+        const int64_t d = tail ? 7 : 3;
+        const int64_t f = tail ? 11 : 4;
+        auto *x = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, d, m);
+        auto *wg = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, d, f);
+        auto *wu = shared ? wg : ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, d, f);
+        auto *wd = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, f, d);
         Fill(x, 1);
         Fill(wg, 5);
-        Fill(wu, 17);
+        if (!shared) {
+            Fill(wu, 17);
+        }
         Fill(wd, 21);
+        if (name == "ffn-region-gate-up-swapped") {
+            std::swap(wg, wu);
+        }
         auto *gate = ggml_mul_mat(context.get(), wg, x);
         auto *up = ggml_mul_mat(context.get(), wu, x);
         inputs = {x, wg, wu, wd};
         operations = {gate, up};
         outputs = {gate, up};
         ggml_tensor *hidden = nullptr;
-        if (name == "ffn-split") {
+        if (!expanded) {
             hidden = ggml_swiglu_split(context.get(), gate, up);
         } else {
             auto *silu = ggml_silu(context.get(), gate);
-            hidden = name == "ffn-expanded-reversed" ?
+            hidden = name.find("reversed") != std::string::npos ?
                 ggml_mul(context.get(), up, silu) : ggml_mul(context.get(), silu, up);
             operations.push_back(silu);
             outputs.push_back(silu);
@@ -128,17 +141,49 @@ struct Fixture {
         outputs.push_back(hidden);
         outputs.push_back(y);
         Compute(y);
-        if (name == "bad-ffn-order") {
+        if (region) {
+            outputs = {y};
+        }
+        if (name == "ffn-region-up-first") {
+            std::swap(operations[0], operations[1]);
+        }
+        if (name == "bad-ffn-order" || name == "bad-region-order") {
             std::swap(operations[0], operations.back());
         }
-        if (name == "bad-ffn-self-cycle") {
+        if (name == "bad-ffn-self-cycle" || name == "bad-region-cycle") {
             y->src[1] = y;
+        }
+        if (name == "bad-region-roles") {
+            std::swap(inputs[1], inputs[2]);
+        }
+        if (name == "bad-region-missing") {
+            operations.pop_back();
+        }
+        if (name == "bad-region-duplicate") {
+            operations[1] = operations[0];
+        }
+        if (name == "bad-region-parameter") {
+            hidden->op_params[1] = 1;
+        }
+        if (name == "bad-region-weight-producer") {
+            wg->op = GGML_OP_ADD;
+        }
+        if (name == "bad-region-output") {
+            outputs = {hidden};
+        }
+        if (name == "bad-region-payload-swap") {
+            auto *gate_data = static_cast<float *>(wg->data);
+            auto *up_data = static_cast<float *>(wu->data);
+            for (int64_t i = 0; i < ggml_nelements(wg); ++i) {
+                std::swap(gate_data[i], up_data[i]);
+            }
         }
     }
 
     void Build(const std::string &name) {
         Require(context != nullptr, "GGML context creation failed");
-        if (name.rfind("ffn-", 0) == 0 || name.rfind("bad-ffn-", 0) == 0) {
+        if (name.rfind("ffn-", 0) == 0 || name.rfind("bad-ffn-", 0) == 0 ||
+            name.rfind("bad-region-", 0) == 0) {
             FFN(name);
         } else if (name.rfind("silu", 0) == 0 || name.rfind("mul-", 0) == 0 ||
                    name.rfind("glu", 0) == 0 || name.rfind("bad-silu", 0) == 0 ||
@@ -219,7 +264,9 @@ int main(int argc, char **argv) {
         if (!library) {
             throw std::runtime_error(dlerror());
         }
-        auto check = reinterpret_cast<CoralCheckGGMLImport>(dlsym(library, "coral_check_ggml_import"));
+        const bool region = std::string(argv[2]).find("region") != std::string::npos;
+        const char *entry = region ? "coral_check_ggml_ffn_import" : "coral_check_ggml_import";
+        auto check = reinterpret_cast<CoralCheckGGMLImport>(dlsym(library, entry));
         Require(check != nullptr, "compiler check library has no test entry point");
         Fixture fixture;
         fixture.Build(argv[2]);

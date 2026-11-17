@@ -61,8 +61,7 @@ std::string ProgramText(mlir::ModuleOp module) {
 }
 } // namespace
 
-extern "C" __attribute__((visibility("default")))
-int coral_check_ggml_import(const CoralGGMLFixture *fixture, const char *output_directory) {
+static int CheckImport(const CoralGGMLFixture *fixture, const char *output_directory, bool ffn) {
     if (!fixture || fixture->version != 1 || !fixture->name || !output_directory) {
         llvm::errs() << "invalid fixture ABI\n";
         return 1;
@@ -72,8 +71,8 @@ int coral_check_ggml_import(const CoralGGMLFixture *fixture, const char *output_
     std::map<const ggml_tensor *, uint64_t> identities;
     for (std::size_t i = 0; i < fixture->input_count; ++i) {
         const auto id = identities.size() + 1;
-        identities.emplace(fixture->inputs[i], id);
-        inputs.push_back({fixture->inputs[i], {id}});
+        const auto inserted = identities.emplace(fixture->inputs[i], id);
+        inputs.push_back({fixture->inputs[i], {inserted.first->second}});
     }
     for (std::size_t i = 0; i < fixture->operation_count; ++i) {
         const auto id = identities.size() + 1;
@@ -92,7 +91,30 @@ int coral_check_ggml_import(const CoralGGMLFixture *fixture, const char *output_
     if (name == "bad-graph-id") { request.graph.revision = 0; }
 
     const auto import_start = Clock::now();
-    auto module = coral::compiler::ImportGGMLFunction(context, request);
+    mlir::OwningOpRef<mlir::ModuleOp> module;
+    const char *entry = ffn ? coral::contracts::kFFNEntryPoint : "imported";
+    if (ffn) {
+        if (inputs.size() != 4 || outputs.size() != 1) {
+            llvm::errs() << "FFN fixture requires four roles and one output\n";
+            return 1;
+        }
+        coral::compiler::GGMLFFNImportRequest region;
+        region.graph = request.graph;
+        region.spec.shape = {inputs[0].tensor->ne[1], inputs[0].tensor->ne[0],
+                             inputs[1].tensor->ne[1]};
+        std::copy(inputs.begin(), inputs.end(), region.inputs.begin());
+        region.operations = operations;
+        region.output = outputs.front();
+        if (name == "bad-region-contract") { ++region.spec.contract_version; }
+        if (name == "bad-region-shape") { ++region.spec.shape.d; }
+        if (name == "bad-region-policy") {
+            region.spec.numeric_policy = static_cast<coral::contracts::FFNNumericPolicy>(99);
+        }
+        if (name == "bad-region-shared-id") { ++region.inputs[2].id.value; }
+        module = coral::compiler::ImportGGMLFFNFunction(context, region);
+    } else {
+        module = coral::compiler::ImportGGMLFunction(context, request);
+    }
     const double import_ms = std::chrono::duration<double, std::milli>(
         Clock::now() - import_start).count();
     const std::string directory(output_directory);
@@ -122,7 +144,7 @@ int coral_check_ggml_import(const CoralGGMLFixture *fixture, const char *output_
         return 1;
     }
     const auto reference_start = Clock::now();
-    auto results = coral::compiler::EvaluateReference(*module, "imported", payloads);
+    auto results = coral::compiler::EvaluateReference(*module, entry, payloads);
     const double reference_ms = std::chrono::duration<double, std::milli>(
         Clock::now() - reference_start).count();
     if (mlir::failed(results) || results->size() != outputs.size() ||
@@ -170,4 +192,14 @@ int coral_check_ggml_import(const CoralGGMLFixture *fixture, const char *output_
         return 1;
     }
     return failed_values ? 1 : 0;
+}
+
+extern "C" __attribute__((visibility("default")))
+int coral_check_ggml_import(const CoralGGMLFixture *fixture, const char *directory) {
+    return CheckImport(fixture, directory, false);
+}
+
+extern "C" __attribute__((visibility("default")))
+int coral_check_ggml_ffn_import(const CoralGGMLFixture *fixture, const char *directory) {
+    return CheckImport(fixture, directory, true);
 }
