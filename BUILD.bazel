@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: MIT
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+cc_library(
+    name = "contracts",
+    hdrs = ["src/contracts/ffn_contract.h", "src/contracts/pointwise_contract.h"],
+    includes = ["src"],
+    visibility = ["//visibility:public"],
+)
+
+# Header-only ABI dependency. The importer reads metadata, not tensor payloads.
+cc_library(
+    name = "ggml_headers",
+    hdrs = ["repos/llama.cpp/ggml/include/ggml.h"],
+    strip_include_prefix = "repos/llama.cpp/ggml/include",
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "ggml_fixture_api",
+    testonly = True,
+    hdrs = ["tests/compiler/ggml_fixture.h"],
+    deps = [":ggml_headers"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["tests/compiler/importer_check.cc"])
+
+cc_library(
+    name = "ggml_ffn_pattern",
+    srcs = ["src/planner/ggml_ffn_pattern.cc"],
+    hdrs = ["src/planner/ggml_ffn_pattern.h", "src/planner/region_plan.h"],
+    includes = ["src"],
+    deps = [":contracts", ":ggml_headers"],
+    visibility = ["//visibility:public"],
+)

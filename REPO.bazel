@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: MIT
+# Injected into the pinned Coral compiler workspace; see scripts/build_m3.sh.

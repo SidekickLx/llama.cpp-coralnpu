@@ -29,6 +29,10 @@
     "renode": {
       "url": "https://github.com/renode/renode.git",
       "revision": "ab721d88e135a1bcb8ed2ecc5a38f51cbe61fdd2"
+    },
+    "stablehlo": {
+      "url": "https://github.com/openxla/stablehlo.git",
+      "revision": "c2eaf28a5f5b6728c97414a8a09168d3e75943c9"
     }
   },
   "bazel_git_overrides": {

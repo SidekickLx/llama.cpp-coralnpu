@@ -39,7 +39,7 @@ v0.2 是编译器、推理系统与量化执行方向的核心成果，其中 Q2
 | 主机 | Linux x86_64，优先固定容器；Windows 可通过 WSL2 开发 | 先减少主机平台变量 |
 | 日常设备模型 | MPACT-CoralNPU，单设备、同步执行 | 快速定位语义和 runtime 问题 |
 | 推理引擎 | 固定 revision 的 llama.cpp/GGML | 复用成熟的模型加载与构图 |
-| 编译链 | 小范围 typed IR → StableHLO → Coral IREE compiler | 把新增工作集中在 GGML 语义桥接 |
+| 编译链 | GGML region → StableHLO typed IR → Coral IREE compiler | 复用成熟 IR、verifier 和参考解释器，明确 GGML 语义桥接边界 |
 | 正式执行入口 | C/C++ 调用 IREE runtime 和已有 Coral HAL | 避免每个算子启动命令行进程 |
 | 编译产物 | module.vmfb、manifest、IR 和 placement 报告 | 统一 AOT/JIT 的执行接口 |
 | 首个模型 | stories260K-f32.gguf | 用很小的真实模型完成集成 |
@@ -68,12 +68,14 @@ flowchart TD
     E --> F["Artifact manager"]
     G["AOT CLI"] --> H["统一编译服务"]
     F -->|JIT miss| H
-    H --> I["Typed IR 与 StableHLO"]
+    H --> I["StableHLO typed IR 与 verifier"]
     I --> J["Coral IREE 编译器"]
     J --> K["VMFB 与 manifest"]
     K --> F
     F --> L["IREE C runtime 与 Coral HAL"]
     L --> M["MPACT execution backend"]
+    I --> R["StableHLO CPU reference evaluator"]
+    R --> T["与 GGML CPU 对照测试"]
 ```
 
 AOT 与 JIT 复用同一个编译函数，差别是调用时机。第一阶段每个 matmul 对应一个小 artifact；后续用完整 FFN artifact 替换多个单算子调用。主进程长期持有 runtime、设备、session 和已加载模块。
@@ -82,7 +84,7 @@ AOT 与 JIT 复用同一个编译函数，差别是调用时机。第一阶段�
 | - | - | - |
 | GGML adapter | device 注册、supports_op、tensor 映射、graph_compute、路由诊断 | GGML scheduler 与 CPU backend |
 | Region planner | FFN 匹配、边界与外部使用检查、shape guards、执行计划 | 固定版本的 GGML 图结构 |
-| Compiler frontend | typed IR、verifier、CPU evaluator、StableHLO 导出 | Coral IREE lowering 与 LLVM codegen |
+| Compiler frontend | GGML→StableHLO importer、函数 ABI/子集检查、数值对照与来源映射 | MLIR/StableHLO types、builders、verifier、reference interpreter；Coral IREE lowering 与 LLVM codegen |
 | Artifact manager | manifest、compatibility、cache key、AOT/JIT、原子发布 | VMFB 格式及 IREE module 加载 |
 | Runtime adapter | 资源 owner、输入输出绑定、权重准备、buffer 复用和计数 | IREE C API、Coral HAL、MPACT |
 | Linux integration | platform driver、UAPI、设备加载协议、Linux execution backend | Renode 平台、Coral 控制寄存器与接口 |
@@ -183,37 +185,77 @@ M0–M1 验证四个假设：
 
 当前 GGML 把 supports_op/supports_buft 放在 device 接口，把 graph_compute 放在 backend 接口。BLAS 的结构可参考，但其 batch 策略不能直接用于本项目的 M=1 验收。[backend 接口](https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-backend-impl.h)；[BLAS 实现](https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-blas/ggml-blas.cpp)
 
-## M3 FFN region 与轻量 IR
+## M3 FFN region 与标准 StableHLO
 
-首个 region 的数学语义如下，X 为 M×D，Wg/Wu 为 D×F，Wd 为 F×D。
+**架构决定（2026-11-16）**：计算 IR 直接使用 StableHLO，保留 typed IR、
+verifier、CPU evaluator 和 region 合法性验证四项职责；复用 MLIR/StableHLO
+已有实现，不引入另一套私有算子图。优先依据成熟架构和扩展性选择组件。
+[M3 接口与语义契约](m3-contracts.md) 是本阶段的接口基准。
+
+首个 region 使用 dense row-major F32，函数 ABI 为
+`ffn(X[M,D], W_gate[F,D], W_up[F,D], W_down[D,F]) -> Y[M,D]`。
+权重按输出通道为行存储，与 M1 的 W[N,K] 约定一致。
 
 ```math
-Y = \left(\operatorname{SiLU}(XW_g) \odot XW_u\right)W_d
+Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T}
 ```
 
-**任务**
+**实现顺序**
 
-1. 导出固定模型的真实 GGML DAG。当前普通 Llama FFN 可表现为两个 projection、一个 split SwiGLU GLU 和 down projection。
+1. **接口与语义契约（已完成）**：共享元数据头文件、FFN ABI、
+   数值策略、candidate/plan/executable 状态、编译/runtime 边界与失败语义。
+2. **真实图接入**：早期完整图导出已验证，现已移除其 scheduler 补丁与 observer。
+   已改用上游 graph_optimize 的 split、全图使用计数和分配依赖；
+   cb_eval 与后端 dispatch trace 提供数值及实际执行证据。
+3. **标准 IR 基础设施（已完成）**：接通固定版本 StableHLO builder、MLIR/StableHLO verifier 和参考解释器。
+   小程序能执行，非法类型/shape 能拒绝；记录实际支持范围。
+4. **逐算子 importer（已完成）**：直接从 GGML 元数据构造标准 StableHLO，
+   验证 MUL_MAT、SILU、MUL 和 split GLU 的参数、维度及数值。
+   当前只接收静态二维 dense F32；view、广播、layout 变换及未知参数明确拒绝。
+   合成 GGML FFN 与真实模型 prefill/decode 的单节点对照通过。
+5. **候选识别与合法性检查（已完成初版）**：识别 3 个 MUL_MAT 加 split GLU，
+   以及 SILU+MUL 展开式。通过未修改的上游 graph_optimize、全图使用计数和
+   add_alloc_dep 验证边界；33 个用例覆盖跨 split、view、callback、复用和存活期。
+   已接入 Coral 后端进行准入检查，不跳过节点或执行融合 FFN。
+6. **Standalone member support and placement (complete)**: SiLU, multiply and
+   split SwiGLU execute through strict Coral VMFBs. Twenty real-model FFN member
+   groups share complete backend compute ranges; callback/missing-artifact
+   cases preserve legal individual execution. See [evidence](m3-pointwise.md).
+7. **Complete FFN import and M3 acceptance (complete)**: import complete
+   synthetic and real-model FFNs into standard StableHLO; verify and compare
+   the official reference interpreter with GGML CPU. The aggregate gate also
+   covers legality, lifetime, rejection paths and real Coral member placement.
+   See the [acceptance report](m3-ffn-acceptance.md).
 
-2. 优先匹配 3 个 MUL_MAT 加 1 个 GLU(SWIGLU split)；再兼容 UNARY(SILU) 加 MUL 的展开式。
-
-3. 为每个受支持成员建立可单独运行的 artifact，保证融合不成立时仍能执行合法节点。
-
-4. 检查 scheduler 的 split，确认目标 region 完整落在同一个 backend split 中。
-
-5. 建立小范围 typed IR，包含 MatMul、SiLU、Mul、Transpose、Reshape、Pad/Crop 及明确 dtype/shape。增加 verifier 和 CPU evaluator。
-
-6. 用 D=128、F=256 的合成 FFN 验证，再加入真实 GGUF 的 D/F 和 tail 情况。
+当前实现和验收证据见 [上游图接口](m3-graph-export.md)、
+[StableHLO 基础设施](m3-stablehlo.md) 与 [逐算子 importer](m3-importer.md)、[融合检查](m3-fusion.md)。
+M3 is accepted for the documented static dense F32 subset on unmodified
+llama.cpp. Members execute separately on Coral. Complete FFN artifact
+compilation, independent reload and three-way device comparison remain M4.
 
 **融合合法性**
 
-首版只接收同一 split 内、执行顺序连续、输入已就绪、无副作用的闭合 region。检查外部 consumer、图输出、debug callback、alias/view 和权重身份。中间值需要被外部观察时，拒绝融合或显式物化。bias、clamp、MoE、packed 单输入 GLU 与其他激活变体在首版拒绝。
+首版只接收同一 split 内、执行顺序连续、输入已就绪、无副作用的闭合 region。
+检查原图 external consumer、图输出、debug callback、alias/view、权重身份、
+graph/schedule generation 和输入存活期。执行锚点是 down projection；所有输入
+必须保留到该处同步执行完成。中间值被外部使用或观察时拒绝融合。
+bias、clamp、MoE、packed 单输入 GLU、其他激活、广播和低精度变体均不在首版范围。
 
-**验收**：GGML CPU 与 IR evaluator 一致；GLU 参数解释正确；非法 region 拒绝融合；不会漏算节点、覆盖外部需要的中间值或提前复用输入内存。
+`RegionPlan` 只描述 GGML 区域、绑定与调度约束；数学计算完整表达在 StableHLO 中。
+标准 verifier 不替代 GGML 语义/区域检查或 Coral capability 检查。
+CPU evaluator 是数值验证支路，不是每次推理都执行的前置阶段或自动 CPU fallback。
 
-**交付**：图导出器、FFN matcher、IR schema、verifier、CPU evaluator 和合法性用例。[FFN 建图](https://github.com/ggml-org/llama.cpp/blob/master/src/llama-graph.cpp)
+**验收**：GGML CPU 与 StableHLO reference 在固定容差内一致；GLU 参数与
+gate/up 绑定正确；真实 placement 和成员执行已验证；非法 region 拒绝融合；
+不会漏算节点、覆盖外部需要的中间值或提前复用输入内存。完整 FFN VMFB 的执行、
+三方对照与产物重载属于 M4。
 
-GGML 的 graph_optimize 在 scheduler 已经切分后的图上运行，不能自然跨过分给 CPU 的 GLU。先保证成员能力与 placement，再融合；确实需要时才加入受控的分图前规划补丁。[scheduler 实现](https://github.com/ggml-org/llama.cpp/blob/master/ggml/src/ggml-backend.cpp)
+**交付**：共享契约、上游图接口接入、FFN matcher/planner、GGML→StableHLO importer、
+标准 verifier/reference 接入、来源映射和合法性用例。
+[FFN 建图](https://github.com/ggml-org/llama.cpp/blob/9fba51d2c9a1b5cb5f0c47986c031334e2d7663a/src/llama-graph.cpp)
+
+GGML 的 graph_optimize 在 scheduler 切分后运行，不能自然跨过分给 CPU 的 GLU。
+先保证成员能力与 placement，再授权融合；分图前补丁需要独立设计与验证。
 
 ## M4 完整 region AOT 与编译产物契约
 
@@ -221,11 +263,11 @@ M0/M1 已经完成单算子 AOT。本阶段把它推广为可独立发布、重�
 
 **任务**
 
-1. 将 typed IR 导出为小范围 StableHLO，调用同一 Coral IREE compiler。
+1. 接收 M3 已验证的 StableHLO module 和 FFN compile spec，调用同一 Coral IREE compiler；不再增加一层自定义计算 IR 转换。
 
 2. 为 exact M=1、16、32 生成 artifact；初期不做 token bucket。
 
-3. 生成 manifest，记录 I/O 顺序、shape、dtype、数值策略、target、ABI、权重布局与 placement。
+3. 按 [M3 接口契约](m3-contracts.md) 落实 manifest wire schema、模块 reflection 和 loader 校验，记录 I/O 顺序、shape、dtype、数值策略、target、ABI、权重布局、toolchain/checksums 与 placement。
 
 4. 用独立 runner 验证完整 FFN，再接到 GGML region plan。
 
@@ -438,8 +480,8 @@ D4 的工作量在三个 gate 完成后估计。现有 ARM Linux demo 不证明�
 | - | - |
 | manifest.json | schema、I/O ABI、shape guards、数值策略、target、toolchain、placement、checksums |
 | module.vmfb | 官方编译器生成的执行模块 |
-| region.ir.json | canonical typed IR |
-| region.stablehlo.mlir | 编译器输入 |
+| region.metadata.json | 区域 I/O 角色、来源节点映射等诊断元数据；不定义计算语义 |
+| region.stablehlo.mlir | 唯一的前端计算 IR，使用标准 StableHLO；作为编译器输入 |
 | lowered.mlir | 需要保留的 lowering 中间结果 |
 | placement.json | host/NPU 计算分配与关键 op 对应 |
 | compile_report.json | 编译耗时、flags、pass 配置、诊断与产物身份 |
@@ -534,10 +576,11 @@ CI 分为轻量 IR/cache 测试、小规模 MPACT 回归和较重的完整构建
 
 | 项目目录 | 职责 |
 | - | - |
-| src/ggml_backend/ | 注册、supports_op、tensor metadata、graph_compute |
+| src/ggml/ | 注册、supports_op、tensor metadata、graph_compute |
+| src/contracts/ | 不依赖 GGML/MLIR/runtime 的共享 ABI 与语义元数据 |
 | src/planner/ | FFN matcher、边界、guards 与 region plan |
 | src/runtime/ | IREE owner、module loader、buffer、binding、权重、观测 |
-| compiler/ | typed IR、verifier、passes、StableHLO exporter、compile worker |
+| compiler/ | GGML→StableHLO importer、标准 verifier/reference 接入、项目契约检查、MLIR passes 与 compile worker |
 | quantization/ | W8A8 reference、W4 signed-nibble 格式、per-group scales、packer/unpacker 与 model manifest |
 | compiler/passes/w4_lowering/ | packed-weight IR、设备端 unpack/INT8 dot lowering 和合法性验证 |
 | artifacts/ | 产物 schema 与小型 fixture，实际模型缓存放运行目录 |
@@ -573,7 +616,7 @@ CI 分为轻量 IR/cache 测试、小规模 MPACT 回归和较重的完整构建
 | M0 环境与最小编译执行 | 16–32 小时 | 工具链、模型基线、MPACT 探针 |
 | M1 独立 C/C++ runtime | 16–32 小时 | matmul、tensor ABI 与数值契约 |
 | M2 GGML backend | 32–56 小时 | v0.1 小模型实际 offload |
-| M3 FFN 与 typed IR | 32–56 小时 | 合法 region、verifier、CPU evaluator |
+| M3 FFN 与 StableHLO | 32–56 小时（原估算，待集成后复核） | 合法 region、标准 typed IR、verifier、CPU reference evaluator |
 | M4 region AOT 与 ABI | 24–40 小时 | 可独立重载的 FFN artifact |
 | M5 JIT 与 IR passes | 32–56 小时 | 缓存、specialization、两项 pass |
 | M6 权重 内存与调度 | 40–72 小时 | v0.2 的内存和调度基础 |

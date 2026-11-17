@@ -9,20 +9,22 @@ The long-term goal is to run llama.cpp on a simulated SoC with a CoralNPU
 accelerator. Today, llama.cpp runs on the Linux host and offloads supported
 matrix multiplications to MPACT through IREE.
 
-**Status: unreleased research prototype.** M1 (standalone runtime) and M2
-(GGML integration and a small model) have passed their current functional
-acceptance tests. These are development milestones. The first `v0.1.0` release
+**Status: unreleased research prototype.** M1 (standalone runtime), M2
+(GGML integration and a small model), and M3 (F32 FFN import, reference semantics
+and placement legality) have passed their scoped functional acceptance tests.
+These are development milestones. The first `v0.1.0` release
 is reserved for SoC integration; completing M2 does not constitute that release.
 
 [Quick start](#quick-start) · [Tests](#tests) ·
 [Repository layout](#repository-layout) · [Development](#development) ·
-[Project plan](docs/project-plan.md)
+[Project plan](docs/project-plan.md) · [M3 contracts](docs/m3-contracts.md)
 
 ## Features
 
 - **GGML integration:** an out-of-tree Coral backend for supported, contiguous
-  two-dimensional F32 `MUL_MAT` operations. The scheduler keeps unsupported
-  operations on the CPU.
+  two-dimensional F32 matmul, SiLU, equal-shape multiply and split SwiGLU.
+  Each operation requires a matching AOT artifact. The scheduler keeps
+  unsupported operations on the CPU.
 - **Ahead-of-time compilation:** static shapes are exported to StableHLO and
   compiled to IREE VM bytecode modules (`.vmfb`). Weights remain runtime inputs.
 - **Persistent C++ runtime:** VM/device lifetime management, tensor ABI checks,
@@ -31,6 +33,9 @@ is reserved for SoC integration; completing M2 does not constitute that release.
   the graph, and performs short prefill and decode runs.
 - **Execution evidence:** per-node placement, successful Coral dispatches,
   simulator kernel instruction counts, and module/weight-cache statistics.
+- **Verified FFN frontend:** direct GGML-to-StableHLO import for static F32
+  matmul, SiLU, multiply and complete SwiGLU FFNs, with fixed input roles,
+  standard verification and the official StableHLO reference interpreter.
 - **Numerical and failure tests:** fixed-token CPU/Coral comparison, adapter
   capability boundaries, mixed graphs, mutable weights, and error propagation.
 
@@ -39,6 +44,20 @@ execution, and a validated tiny F32 model. Attention and other unsupported
 operations still run on the CPU. FFN subgraph compilation, JIT, W8A8/W4A8,
 concurrent requests, and SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
+
+M3 frontend and planning work provides the [FFN contracts](docs/m3-contracts.md),
+[upstream graph integration](docs/m3-graph-export.md),
+[typed StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
+the [per-operation GGML importer](docs/m3-importer.md), and
+[FFN recognition and legality checks](docs/m3-fusion.md).
+[Complete FFN acceptance](docs/m3-ffn-acceptance.md) compares synthetic graphs
+and all five layers of the tiny model across prefill and three decode steps
+against GGML CPU. Fusion checks cover external consumers, views, callbacks,
+graph reuse and input lifetime through unmodified upstream interfaces.
+[Standalone member execution and real FFN placement](docs/m3-pointwise.md)
+are verified: complete FFN members can share a Coral compute range.
+They still execute as separate programs. Invoking a complete FFN VMFB and
+comparing CPU/StableHLO/Coral results belongs to M4.
 
 ## How it works
 
@@ -49,7 +68,7 @@ Preparation:
 Inference:
   GGUF -> llama.cpp -> GGML scheduler
                         |-- unsupported operations -> CPU
-                        +-- supported F32 matmul -> Coral adapter
+                        +-- supported F32 members -> Coral adapter
                                                  -> IREE VM / HAL
                                                  -> MPACT CoralNPU simulation
 ~~~
@@ -57,7 +76,9 @@ Inference:
 GGUF contains model metadata and tensors. It is not translated wholesale into
 StableHLO here. The exporter emits one matmul program per static shape, with
 the contract `Y[M,N] = X[M,K] × transpose(W[N,K])`. The compiler runs during
-preparation; inference only loads existing VMFBs.
+preparation; inference only loads existing VMFBs. The Quick start below retains
+the matmul-only M2 path. The [M3 member guide](docs/m3-pointwise.md) adds
+the separate `pointwise.tsv` catalog and same-split validation.
 
 A missing shape is ineligible for Coral and stays on the CPU. Once an operation
 is accepted for Coral execution, an invalid artifact or runtime failure is
@@ -274,6 +295,8 @@ Patched submodules appearing modified is expected. See the
 [pinned upstream instructions](https://github.com/google-coral/coralnpu-compiler/blob/770dc9332dffed8ff91d8cface7e9d176227d912/README.md)
 for dependency details.
 
+The pinned llama.cpp checkout is used without project patches.
+
 ### 5. Build the compiler, simulator, and runners
 
 First build the compiler and MPACT shared library. This is the expensive step;
@@ -301,7 +324,7 @@ cmake -S . -B build/m1 -G Ninja \
     -DBUILD_TESTING=ON
 
 cmake --build build/m1 --target \
-    coral-llama-runner coral-matmul-runner coral-adapter-test -j 4
+    coral-llama-runner coral-matmul-runner coral-adapter-test coral-ffn-planner-test -j 4
 ~~~
 
 The `build/m1` name comes from the standalone runtime milestone; it also contains
@@ -511,7 +534,8 @@ cmake -S . -B build/m1 \
 ctest --test-dir build/m1 --output-on-failure
 ~~~
 
-Expect four passing tests: three M1 shapes and `m2_adapter_boundaries`.
+Expect five passing tests: three M1 shapes, `m2_adapter_boundaries`, and
+`m3_ffn_planner`.
 The adapter suite runs 23 isolated cases with 95 checks covering capability
 queries, CPU routing, mixed graphs, mutable/immutable weights, cache reuse,
 and failure propagation. CTest registers artifact-dependent tests only after
@@ -529,6 +553,31 @@ python tests/ggml/verify_adapter.py \
 See the [adapter acceptance report](docs/m2-adapter-validation.md) for coverage.
 The broader M1 validation also compares Zvt/RVV and checks file I/O and
 rejection paths; the [M1 guide](docs/m1-runtime.md) describes its extra fixtures.
+
+### Complete M3 acceptance
+
+After preparing the matmul artifacts above, follow the
+[M3 member guide](docs/m3-pointwise.md) once to build the StableHLO tools and
+prepare the separate pointwise artifacts. Reuse those directories and build
+the acceptance executables:
+
+~~~bash
+cmake --build build/m1 --target \
+    coral-matmul-runner coral-llama-runner coral-adapter-test \
+    coral-ffn-planner-test coral-ggml-import-test coral-model-import-test \
+    coral-pointwise-test coral-member-adapter-test -j4
+# Set POINTWISE_DIR to the directory printed by prepare_pointwise.py.
+python tests/verify_m3.py \
+    --matmuls "$ARTIFACT_DIR" --pointwise "$POINTWISE_DIR"
+~~~
+
+The gate runs nine suites, including the five CTests, original M2 inference,
+standard verifier/reference checks, synthetic and real complete FFN imports,
+fusion/lifetime checks, and actual Coral member execution. It requires the
+clean locked llama.cpp checkout and configured M1 fixtures. It keeps builds,
+artifacts and logs, and writes a new report under `build/m3-acceptance-results/`.
+See the [M3 acceptance report](docs/m3-ffn-acceptance.md) for exact coverage,
+numerical results, diagnostic timing and the M4 boundary.
 
 ### Performance measurements
 
@@ -558,6 +607,8 @@ traffic or peak device memory.
 | [`src/runtime/`](src/runtime/) | M1 C++ runtime, VM/HAL and simulator ownership, tensor ABI, standalone runner |
 | [`src/ggml/`](src/ggml/) | Backend capability/routing logic, artifact and weight-cache integration, model runner |
 | [`src/support/`](src/support/) | Shared JSON output helpers |
+| [`src/contracts/`](src/contracts/) | M3 FFN ABI, shape, numerical policy, and tensor-role metadata |
+| [`src/planner/`](src/planner/) | M3 FFN recognition, capability/legality checks, allocation dependencies and live guards |
 | [`compiler/export_matmul.py`](compiler/export_matmul.py) | Export static F32 matmul shapes to StableHLO text |
 | [`tests/runtime/`](tests/runtime/) | Standalone runtime validation across compiled profiles |
 | [`tests/ggml/`](tests/ggml/) | Adapter boundaries, model comparisons, and performance measurements |
@@ -580,7 +631,9 @@ Local-only paths are excluded from Git:
 
 ### Where to start reading
 
-1. Read [the project plan](docs/project-plan.md) for the architecture and contracts.
+1. Read [the project plan](docs/project-plan.md) and the
+   [M3 FFN contract](docs/m3-contracts.md) for architecture, interfaces, and
+   the ordered implementation/acceptance steps.
 2. Follow [`compiler/export_matmul.py`](compiler/export_matmul.py) to see the
    tensor ABI in a small StableHLO module.
 3. Read [`src/runtime/matmul_runtime.h`](src/runtime/matmul_runtime.h) and
@@ -599,7 +652,7 @@ From an existing checkout with a configured `build/m1` directory:
 ~~~bash
 source ./env.sh
 cmake --build build/m1 --target \
-    coral-llama-runner coral-matmul-runner coral-adapter-test -j 4
+    coral-llama-runner coral-matmul-runner coral-adapter-test coral-ffn-planner-test -j 4
 ~~~
 
 Keep build outputs and dependency caches. Reuse the same toolchain and Bazel
@@ -617,7 +670,7 @@ above; exporter, target-flag, or compiler changes require matching VMFBs.
 | Runner refuses an output directory | Select a new directory; existing results are preserved |
 | No Coral offload occurs | Check dtype/layout/precision and whether shapes have compiled entries in `profiles.tsv` |
 | VMFB ABI or load failure | Use artifacts matching these shapes and pinned dependencies; inspect compiler/runtime logs |
-| CTest finds fewer than four tests | Enable M2/testing, build the test executable, and configure all three `M1_VMFB_M*` paths |
+| CTest finds fewer than five tests | Enable M2/testing, build the test executable, and configure all three `M1_VMFB_M*` paths |
 | Another terminal cannot find tools | Source `env.sh` before building or running preparation steps |
 
 ### Contributing and roadmap
@@ -626,7 +679,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes FFN compilation, typed IR, AOT/JIT artifact management,
+Future work includes complete FFN member support and same-split placement,
+full-region compilation and execution, AOT/JIT artifact management,
 W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
 will be assigned separately from development milestones.
@@ -636,3 +690,10 @@ will be assigned separately from development milestones.
 Original work is licensed under the [MIT License](LICENSE). Referenced and
 downloaded upstream projects and models retain their respective licenses;
 this repository does not relicense third-party materials.
+
+M3 development: [interface and semantic contract](docs/m3-contracts.md) and
+[upstream graph integration](docs/m3-graph-export.md), plus
+[StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
+[GGML importer interfaces and tests](docs/m3-importer.md),
+[unpatched integration and fusion acceptance](docs/m3-unpatched-test-report.md),
+and [complete M3 acceptance](docs/m3-ffn-acceptance.md).

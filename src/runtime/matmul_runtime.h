@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
+#include "contracts/pointwise_contract.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -77,6 +78,7 @@ class DeviceContext {
     std::shared_ptr<detail::DeviceState> state_;
     friend class PreparedWeight;
     friend class LoadedModule;
+    friend class PointwiseModule;
 };
 
 // An immutable, owning snapshot of W[N,K]. No shape-only weight cache.
@@ -113,6 +115,23 @@ class LoadedModule {
     // real Coral dispatch evidence and readback have all succeeded.
     std::vector<float> Run(TensorBinding activation, const PreparedWeight &weights);
 
+  private:
+    std::unique_ptr<detail::ModuleState> state_;
+};
+
+// Reuses the same strict VM/HAL context and Coral-only execution checks.
+// Inputs are copied at each call and staging buffers are reused. There are no
+// immutable weights in this ABI and no cached activation values.
+class PointwiseModule {
+  public:
+    PointwiseModule(const DeviceContext &, const std::string &vmfb_path,
+                    contracts::PointwiseSpec);
+    ~PointwiseModule();
+    PointwiseModule(PointwiseModule &&) noexcept;
+    PointwiseModule &operator=(PointwiseModule &&) noexcept;
+    PointwiseModule(const PointwiseModule &) = delete;
+    PointwiseModule &operator=(const PointwiseModule &) = delete;
+    std::vector<float> Run(const std::vector<TensorBinding> &inputs);
   private:
     std::unique_ptr<detail::ModuleState> state_;
 };

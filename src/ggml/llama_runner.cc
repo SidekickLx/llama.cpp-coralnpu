@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "ggml_coral.h"
+#include "planner/ggml_fusion.h"
 #include "support/json.h"
 #include "llama.h"
 #include <algorithm>
@@ -35,6 +36,7 @@ struct Arguments {
     fs::path tokens;
     std::string prompt = "Once upon a time";
     int decode = 3;
+    std::string observation = "nodes";
 };
 
 void Usage() {
@@ -42,6 +44,7 @@ void Usage() {
         << "coral-llama-runner --mode cpu|coral --model FILE --output NEW_DIRECTORY\n"
         << "  [--prompt TEXT --decode 2|3|4] | [--tokens FILE]\n"
         << "  --artifacts DIRECTORY   Required only in Coral mode (AOT profiles.tsv + VMFBs).\n"
+        << "  --observation nodes|backend   Backend mode omits evaluation callbacks.\n"
         << "A replay file supplies both prompt and decode input tokens. No compiler is invoked.\n";
 }
 
@@ -50,7 +53,10 @@ Arguments Parse(int argc, char **argv) {
     std::set<std::string> seen;
     for (int i = 1; i < argc; ++i) {
         const std::string key = argv[i];
-        if (!seen.insert(key).second || i + 1 >= argc) {
+        if (!seen.insert(key).second) {
+            throw std::invalid_argument("duplicate option: " + key);
+        }
+        if (i + 1 >= argc) {
             throw std::invalid_argument("duplicate option or missing option value: " + key);
         }
         const std::string value = argv[++i];
@@ -65,6 +71,8 @@ Arguments Parse(int argc, char **argv) {
             args.output = value;
         } else if (key == "--artifacts") {
             args.artifacts = value;
+        } else if (key == "--observation") {
+            args.observation = value;
         } else if (key == "--tokens") {
             args.tokens = value;
         } else if (key == "--prompt") {
@@ -78,6 +86,9 @@ Arguments Parse(int argc, char **argv) {
             throw std::invalid_argument("unknown option: " + key);
         }
     }
+    if (args.observation != "nodes" && args.observation != "backend") {
+        throw std::invalid_argument("--observation must be nodes or backend");
+    }
     if (args.mode != "cpu" && args.mode != "coral") {
         throw std::invalid_argument("--mode must be cpu or coral");
     }
@@ -89,6 +100,9 @@ Arguments Parse(int argc, char **argv) {
     }
     if (!args.tokens.empty() && (seen.count("--prompt") || seen.count("--decode"))) {
         throw std::invalid_argument("--tokens cannot be combined with --prompt or --decode");
+    }
+    if (args.mode == "cpu" && args.observation == "backend") {
+        throw std::invalid_argument("backend observation requires Coral mode");
     }
     if (args.decode < 2 || args.decode > 4 || args.prompt.size() > 4096) {
         throw std::invalid_argument("use 2-4 decode steps and a prompt of at most 4096 bytes");
@@ -161,7 +175,12 @@ void WriteStats(std::ostream &out, const adapter::Stats &after, const adapter::S
     const auto &a = after.runtime;
     const auto &b = before.runtime;
     out << "{\"graph_calls\":" << after.graph_calls - before.graph_calls
+        << ",\"graph_optimizations\":" << after.graph_optimizations - before.graph_optimizations
+        << ",\"ffn_candidates\":" << after.ffn_candidates - before.ffn_candidates
+        << ",\"ffn_preparation_plans\":" << after.ffn_preparation_plans - before.ffn_preparation_plans
+        << ",\"ffn_rejections\":" << after.ffn_rejections - before.ffn_rejections
         << ",\"matmuls\":" << after.matmuls - before.matmuls
+        << ",\"pointwise_calls\":" << after.pointwise_calls - before.pointwise_calls
         << ",\"weight_preparations\":" << after.weight_preparations - before.weight_preparations
         << ",\"weight_cache_hits\":" << after.weight_cache_hits - before.weight_cache_hits
         << ",\"failures\":" << after.failures - before.failures
@@ -198,6 +217,8 @@ struct Trace {
     std::uint64_t coral_nodes = 0;
     std::uint64_t cpu_matmuls = 0;
     int step = -1;
+    bool backend_observation = false;
+    std::set<std::tuple<std::string, std::size_t, std::size_t>> pointwise_profiles;
 
     explicit Trace(const fs::path &path) : output(OpenOutput(path)) {}
 
@@ -252,11 +273,16 @@ struct Trace {
         output << "],\"buffer_id\":" << buffer_id << '}';
     }
 
-    void Observe(ggml_tensor *node) {
+    void Observe(const ggml_tensor *node) {
         MatmulShape shape;
         const bool compatible = adapter::Compatible(node, &shape);
         if (compatible) {
             profiles.emplace(shape.m, shape.k, shape.n);
+        }
+        coral::contracts::PointwiseSpec pointwise;
+        const bool pointwise_compatible = adapter::CompatiblePointwise(node, &pointwise);
+        if (pointwise_compatible) {
+            pointwise_profiles.emplace(pointwise.EntryPoint(), pointwise.rows, pointwise.cols);
         }
         const auto event = pending.find(node);
         const bool coral = event != pending.end();
@@ -276,7 +302,7 @@ struct Trace {
                << ",\"name\":" << JsonString(ggml_get_name(node))
                << ",\"op\":" << JsonString(ggml_op_name(node->op))
                << ",\"placement\":" << JsonString(coral ? "CORAL" : "CPU")
-               << ",\"coral_compatible\":" << (compatible ? "true" : "false")
+               << ",\"coral_compatible\":" << (compatible || pointwise_compatible ? "true" : "false")
                << ",\"output\":";
         Tensor(node, dst);
         output << ",\"src0\":";
@@ -295,7 +321,8 @@ struct Trace {
             output << ']';
         }
         if (coral) {
-            output << ",\"dispatches\":" << event->second.dispatches
+            output << ",\"compute_call\":" << event->second.compute_call
+                   << ",\"dispatches\":" << event->second.dispatches
                    << ",\"instructions\":" << event->second.instructions
                    << ",\"weight_cache_hit\":" << (event->second.weight_cache_hit ? "true" : "false");
             pending.erase(event);
@@ -309,6 +336,24 @@ struct Trace {
             !trace.pending.emplace(event.node, event).second) {
             throw std::runtime_error("invalid or duplicate Coral node event");
         }
+        if (trace.backend_observation) {
+            trace.Observe(event.node);
+        }
+    }
+
+    static void OnPlan(const coral::planner::GGMLFFNPlan &plan, void *user) {
+        auto &trace = *static_cast<Trace *>(user);
+        trace.output << "{\"kind\":\"ffn_plan\",\"step\":" << trace.step
+                     << ",\"generation\":" << plan.generation
+                     << ",\"m\":" << plan.shape.m << ",\"d\":" << plan.shape.d
+                     << ",\"f\":" << plan.shape.f << ",\"members\":[";
+        for (std::size_t i = 0; i < plan.members.size(); ++i) {
+            if (i) trace.output << ',';
+            const auto *node = plan.members[i];
+            trace.output << "{\"name\":" << JsonString(ggml_get_name(node))
+                         << ",\"op\":" << JsonString(ggml_op_name(node->op)) << '}';
+        }
+        trace.output << "]}\n";
     }
 
     static bool OnEval(ggml_tensor *node, bool ask, void *user) noexcept {
@@ -349,6 +394,13 @@ struct Trace {
             file << m << '\t' << k << '\t' << n << "\tm" << m << "_k" << k << "_n" << n << ".vmfb\n";
         }
         file.close();
+        auto members = OpenOutput(path.parent_path() / "pointwise.tsv");
+        members << "coral-m3-pointwise-v1\n";
+        for (const auto &[op, m, n] : pointwise_profiles) {
+            members << op << '\t' << m << '\t' << n << '\t' << op << "_m" << m
+                    << "_n" << n << ".vmfb\n";
+        }
+        members.close();
     }
 };
 
@@ -422,6 +474,7 @@ void Run(const Arguments &args) {
     }
     const bool coral = args.mode == "coral";
     Trace trace(args.output / "trace.jsonl");
+    trace.backend_observation = args.observation == "backend";
     auto steps = OpenOutput(args.output / "steps.jsonl");
     auto logits = OpenOutput(args.output / "logits.f32", true);
     CheckBackends(false);
@@ -434,6 +487,8 @@ void Run(const Arguments &args) {
         options.immutable_model_weights = true;
         options.trace = Trace::OnCoral;
         options.trace_user_data = &trace;
+        options.plan_trace = Trace::OnPlan;
+        options.evaluation_callbacks = !trace.backend_observation;
         adapter::Register(options);
     }
     CheckBackends(coral);
@@ -474,8 +529,10 @@ void Run(const Arguments &args) {
     context_params.type_v = GGML_TYPE_F32;
     context_params.offload_kqv = false;
     context_params.op_offload = coral;
-    context_params.cb_eval = Trace::OnEval;
-    context_params.cb_eval_user_data = &trace;
+    if (!trace.backend_observation) {
+        context_params.cb_eval = Trace::OnEval;
+        context_params.cb_eval_user_data = &trace;
+    }
     std::unique_ptr<llama_context, decltype(&llama_free)> context(
         llama_init_from_model(model.get(), context_params), llama_free);
     if (!context) {
@@ -516,15 +573,18 @@ void Run(const Arguments &args) {
         steps << "{\"step\":" << step << ",\"phase\":" << JsonString(trace.Phase())
               << ",\"input_tokens\":" << inputs.size()
               << ",\"position\":" << position << ",\"logit_row\":" << step
-              << ",\"argmax_token\":" << next << ",\"cpu_nodes\":" << trace.cpu_nodes
-              << ",\"cpu_matmuls\":" << trace.cpu_matmuls
+              << ",\"argmax_token\":" << next << ",\"cpu_nodes\":"
+              << (trace.backend_observation ? "null" : std::to_string(trace.cpu_nodes))
+              << ",\"cpu_matmuls\":"
+              << (trace.backend_observation ? "null" : std::to_string(trace.cpu_matmuls))
               << ",\"coral_nodes\":" << trace.coral_nodes << ",\"wall_ms\":" << elapsed
               << ",\"stats\":";
         WriteStats(steps, after, before);
         steps << "}\n";
         steps.flush();
-        std::cout << trace.Phase() << " step=" << step << " CPU nodes=" << trace.cpu_nodes
-                  << " Coral matmuls=" << trace.coral_nodes
+        std::cout << trace.Phase() << " step=" << step << " observed CPU nodes="
+                  << (trace.backend_observation ? "unavailable" : std::to_string(trace.cpu_nodes))
+                  << " Coral nodes=" << trace.coral_nodes
                   << " dispatches=" << after.runtime.coral_dispatches - before.runtime.coral_dispatches
                   << " argmax=" << next << '\n';
         position += static_cast<int>(inputs.size());
@@ -539,7 +599,8 @@ void Run(const Arguments &args) {
     // files, but never receive a successful summary.
     auto summary = OpenOutput(args.output / "summary.pending.json");
     summary << "{\"schema\":\"coral-m2-run-v1\",\"status\":\"completed\",\"mode\":"
-            << JsonString(args.mode) << ",\"coral_registered\":" << (coral ? "true" : "false")
+            << JsonString(args.mode) << ",\"observation\":" << JsonString(args.observation)
+            << ",\"coral_registered\":" << (coral ? "true" : "false")
             << ",\"registered_devices\":[\"CPU\"" << (coral ? ",\"CORAL\"" : "") << ']'
             << ",\"prefill_tokens\":" << tokens.prefill << ",\"decode_steps\":" << tokens.decode
             << ",\"vocab_size\":" << vocab_size << ",\"logit_rows\":" << tokens.decode + 1

@@ -66,8 +66,13 @@ def read_run(directory, mode):
         coral = [node for node in nodes if node["placement"] == "CORAL"]
         cpu = [node for node in nodes if node["placement"] == "CPU"]
         require(len(nodes) == len(cpu) + len(coral), "unknown placement")
-        require(len(coral) == step["coral_nodes"] and len(cpu) == step["cpu_nodes"], "node trace mismatch")
-        require(len(cpu) > 0, "expected unsupported operations to execute on CPU")
+        require(len(coral) == step["coral_nodes"], "Coral node trace mismatch")
+        if summary.get("observation", "nodes") == "nodes":
+            require(len(cpu) == step["cpu_nodes"] and len(cpu) > 0,
+                    "missing CPU observations")
+        else:
+            require(not cpu and step["cpu_nodes"] is None and step["cpu_matmuls"] is None,
+                    "backend observation must not invent CPU counts")
         for node in nodes:
             for field in ("src0", "src1", "output"):
                 tensor = node[field]
@@ -81,7 +86,10 @@ def read_run(directory, mode):
         if mode == "coral":
             require(len(coral) > 0 and stats["kernel_instructions"] > 0, "no actual NPU execution")
             require(stats["instruction_samples"] == stats["coral_dispatches"], "missing instruction samples")
-            require(stats["matmuls"] == len(coral) == stats["calls_completed"], "incomplete matmuls")
+            matmuls = sum(node["op"] == "MUL_MAT" for node in coral)
+            require(stats["matmuls"] == matmuls, "matmul trace mismatch")
+            require(stats.get("pointwise_calls", 0) == len(coral) - matmuls, "member trace mismatch")
+            require(len(coral) == stats["calls_completed"], "incomplete Coral calls")
             if index >= 2:
                 require(stats["module_loads"] == 0, "warm decode reloaded a module")
                 require(stats["weight_cache_hits"] > 0, "warm decode did not reuse model weights")
@@ -132,6 +140,12 @@ def run_suite(runner, model, artifacts, work):
         invoke(runner, ["--mode", "coral", "--model", model, "--output", coral,
                         "--tokens", cpu / "tokens.txt", "--artifacts", artifacts], "coral", work)
         candidate, actual = read_run(coral, "coral")
+        checks = candidate["stats"]
+        require(checks["graph_optimizations"] > 0 and checks["ffn_candidates"] > 0,
+                "upstream FFN planning hook was not exercised")
+        require(checks["ffn_preparation_plans"] == 0 and
+                checks["ffn_rejections"] == checks["ffn_candidates"],
+                "diagnostic callback or unsupported FFN was incorrectly admitted")
         require(candidate["vocab_size"] == baseline["vocab_size"] and len(actual) == len(reference),
                 "incompatible logit shapes")
         require((coral / "tokens.txt").read_bytes() == (cpu / "tokens.txt").read_bytes(), "Coral inputs differ")
