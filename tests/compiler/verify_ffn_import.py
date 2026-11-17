@@ -13,6 +13,7 @@ POSITIVE = [
     "ffn-region-decode", "ffn-region-prefill",
     "ffn-region-shared", "ffn-region-shared-expanded",
     "ffn-region-gate-up-swapped", "ffn-region-up-first",
+    "ffn-region-profile-m1", "ffn-region-profile-m16", "ffn-region-profile-m32",
 ]
 NEGATIVE = {
     "bad-region-contract": "ffn-contract", "bad-region-policy": "ffn-contract",
@@ -39,7 +40,7 @@ def main():
         with (work / f"{name}.stdout.txt").open("w") as out, (work / f"{name}.stderr.txt").open("w") as err:
             result = subprocess.run(
                 [str(args.runner.resolve()), str(args.check_library.resolve()), name, str(output)],
-                stdout=out, stderr=err, timeout=90, check=False)
+                stdout=out, stderr=err, timeout=600, check=False)
         text = (work / f"{name}.stderr.txt").read_text()
         expected = 2 if name in NEGATIVE else 1 if name == "bad-region-payload-swap" else 0
         if result.returncode != expected:
@@ -65,7 +66,13 @@ def main():
                     raise RuntimeError("missing positional role")
             inputs = json.loads((output / "inputs.json").read_text())["inputs"]
             if len(inputs) != 4: raise RuntimeError("shared identity collapsed an ABI argument")
+            if name.startswith("ffn-region-profile-m"):
+                m = int(name.removeprefix("ffn-region-profile-m"))
+                expected_shapes = [[m, 128], [256, 128], [256, 128], [128, 256]]
+                if [tensor["shape"] for tensor in inputs] != expected_shapes:
+                    raise RuntimeError("incorrect contract profile dimensions")
             reports.append(report)
+            print(f"{name}: passed", flush=True)
     def values(name):
         return json.loads((work / name / "reference-output.json").read_text())["outputs"][0]["values"]
     reference = values("ffn-region-split")

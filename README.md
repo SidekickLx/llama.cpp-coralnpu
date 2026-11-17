@@ -9,9 +9,10 @@ The long-term goal is to run llama.cpp on a simulated SoC with a CoralNPU
 accelerator. Today, llama.cpp runs on the Linux host and offloads supported
 matrix multiplications to MPACT through IREE.
 
-**Status: unreleased research prototype.** M1 (standalone runtime) and M2
-(GGML integration and a small model) have passed their current functional
-acceptance tests. These are development milestones. The first `v0.1.0` release
+**Status: unreleased research prototype.** M1 (standalone runtime), M2
+(GGML integration and a small model), and M3 (F32 FFN import, reference semantics
+and placement legality) have passed their scoped functional acceptance tests.
+These are development milestones. The first `v0.1.0` release
 is reserved for SoC integration; completing M2 does not constitute that release.
 
 [Quick start](#quick-start) · [Tests](#tests) ·
@@ -32,9 +33,9 @@ is reserved for SoC integration; completing M2 does not constitute that release.
   the graph, and performs short prefill and decode runs.
 - **Execution evidence:** per-node placement, successful Coral dispatches,
   simulator kernel instruction counts, and module/weight-cache statistics.
-- **M3 frontend foundations:** direct
-  GGML-to-StableHLO import for static F32 matmul, SiLU, multiply and split SwiGLU,
-  official typed ops/verifier, and the upstream CPU reference interpreter.
+- **Verified FFN frontend:** direct GGML-to-StableHLO import for static F32
+  matmul, SiLU, multiply and complete SwiGLU FFNs, with fixed input roles,
+  standard verification and the official StableHLO reference interpreter.
 - **Numerical and failure tests:** fixed-token CPU/Coral comparison, adapter
   capability boundaries, mixed graphs, mutable weights, and error propagation.
 
@@ -49,13 +50,14 @@ M3 frontend and planning work provides the [FFN contracts](docs/m3-contracts.md)
 [typed StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
 the [per-operation GGML importer](docs/m3-importer.md), and
 [FFN recognition and legality checks](docs/m3-fusion.md).
-Numerical tests cover composed GGML FFN fixtures and captured real-model matmul
-and split SwiGLU nodes during prefill/decode. Fusion checks use upstream graph,
-use-count and allocation interfaces with no llama.cpp patch.
+[Complete FFN acceptance](docs/m3-ffn-acceptance.md) compares synthetic graphs
+and all five layers of the tiny model across prefill and three decode steps
+against GGML CPU. Fusion checks cover external consumers, views, callbacks,
+graph reuse and input lifetime through unmodified upstream interfaces.
 [Standalone member execution and real FFN placement](docs/m3-pointwise.md)
-are verified: the complete FFN members can share a Coral compute range.
-They still execute as separate programs. Full real-region import acceptance
-remains M3 work; invoking a fused FFN VMFB belongs to M4.
+are verified: complete FFN members can share a Coral compute range.
+They still execute as separate programs. Invoking a complete FFN VMFB and
+comparing CPU/StableHLO/Coral results belongs to M4.
 
 ## How it works
 
@@ -322,7 +324,7 @@ cmake -S . -B build/m1 -G Ninja \
     -DBUILD_TESTING=ON
 
 cmake --build build/m1 --target \
-    coral-llama-runner coral-matmul-runner coral-adapter-test -j 4
+    coral-llama-runner coral-matmul-runner coral-adapter-test coral-ffn-planner-test -j 4
 ~~~
 
 The `build/m1` name comes from the standalone runtime milestone; it also contains
@@ -532,7 +534,8 @@ cmake -S . -B build/m1 \
 ctest --test-dir build/m1 --output-on-failure
 ~~~
 
-Expect four passing tests: three M1 shapes and `m2_adapter_boundaries`.
+Expect five passing tests: three M1 shapes, `m2_adapter_boundaries`, and
+`m3_ffn_planner`.
 The adapter suite runs 23 isolated cases with 95 checks covering capability
 queries, CPU routing, mixed graphs, mutable/immutable weights, cache reuse,
 and failure propagation. CTest registers artifact-dependent tests only after
@@ -550,6 +553,31 @@ python tests/ggml/verify_adapter.py \
 See the [adapter acceptance report](docs/m2-adapter-validation.md) for coverage.
 The broader M1 validation also compares Zvt/RVV and checks file I/O and
 rejection paths; the [M1 guide](docs/m1-runtime.md) describes its extra fixtures.
+
+### Complete M3 acceptance
+
+After preparing the matmul artifacts above, follow the
+[M3 member guide](docs/m3-pointwise.md) once to build the StableHLO tools and
+prepare the separate pointwise artifacts. Reuse those directories and build
+the acceptance executables:
+
+~~~bash
+cmake --build build/m1 --target \
+    coral-matmul-runner coral-llama-runner coral-adapter-test \
+    coral-ffn-planner-test coral-ggml-import-test coral-model-import-test \
+    coral-pointwise-test coral-member-adapter-test -j4
+# Set POINTWISE_DIR to the directory printed by prepare_pointwise.py.
+python tests/verify_m3.py \
+    --matmuls "$ARTIFACT_DIR" --pointwise "$POINTWISE_DIR"
+~~~
+
+The gate runs nine suites, including the five CTests, original M2 inference,
+standard verifier/reference checks, synthetic and real complete FFN imports,
+fusion/lifetime checks, and actual Coral member execution. It requires the
+clean locked llama.cpp checkout and configured M1 fixtures. It keeps builds,
+artifacts and logs, and writes a new report under `build/m3-acceptance-results/`.
+See the [M3 acceptance report](docs/m3-ffn-acceptance.md) for exact coverage,
+numerical results, diagnostic timing and the M4 boundary.
 
 ### Performance measurements
 
@@ -624,7 +652,7 @@ From an existing checkout with a configured `build/m1` directory:
 ~~~bash
 source ./env.sh
 cmake --build build/m1 --target \
-    coral-llama-runner coral-matmul-runner coral-adapter-test -j 4
+    coral-llama-runner coral-matmul-runner coral-adapter-test coral-ffn-planner-test -j 4
 ~~~
 
 Keep build outputs and dependency caches. Reuse the same toolchain and Bazel
@@ -667,4 +695,5 @@ M3 development: [interface and semantic contract](docs/m3-contracts.md) and
 [upstream graph integration](docs/m3-graph-export.md), plus
 [StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
 [GGML importer interfaces and tests](docs/m3-importer.md),
-and [unpatched integration and fusion acceptance](docs/m3-unpatched-test-report.md).
+[unpatched integration and fusion acceptance](docs/m3-unpatched-test-report.md),
+and [complete M3 acceptance](docs/m3-ffn-acceptance.md).

@@ -3,8 +3,9 @@
 Status: **accepted design contract**, version 1. Implementation progress and
 acceptance evidence: [upstream graph integration](m3-graph-export.md),
 [StableHLO infrastructure](m3-stablehlo.md) and [importer](m3-importer.md).
-The metadata headers do not authorize execution. Full FFN device execution
-and the complete M3 acceptance gate remain separate milestones.
+The [complete M3 gate](m3-ffn-acceptance.md) has passed for the admitted static
+dense F32 subset. The metadata headers do not authorize execution.
+Full FFN device execution remains M4.
 
 This document defines the M3/M4 boundary and supersedes the earlier proposal
 for a private computational IR followed by a separate StableHLO exporter.
@@ -203,10 +204,11 @@ Policy identifier: `f32-no-fast-math-v1`.
 - The runtime binding ABI specifies F32 storage, not a scan of every input
   value. Finite-value screening is performed by validation tools; unusual
   values are not silently clamped or replaced in inference.
-- The proposed M3 acceptance threshold is elementwise
+- The M3 acceptance threshold is elementwise
   `abs(actual-reference) <= 1e-4 + 1e-4 * abs(reference)` for the named
-  intermediates and final FFN result. This is a requirement to validate, not
-  an already measured M3 result. Keep existing M1/M2 thresholds unchanged.
+  intermediates and final FFN result. Synthetic and real-model acceptance
+  results are recorded in the [report](m3-ffn-acceptance.md).
+  Keep existing M1/M2 thresholds unchanged.
 - Record maximum absolute/relative error and failing indices. Compare GGML
   CPU with StableHLO reference, then both with Coral in M4. Tolerance failures
   require diagnosis and an explicit reviewed policy/test-contract change;
@@ -387,13 +389,13 @@ preparation policy; it must preserve these error and ownership boundaries.
 
 | Step | Deliverable | Gate |
 | --- | --- | --- |
-| 1 (this change) | Metadata headers and semantic/interface contract | Consistent ABI, ownership, failure behavior and milestone boundaries |
-| 2 | Upstream graph integration | Scheduled views retain global uses; public evaluation callbacks and backend traces provide execution evidence |
-| 3 | StableHLO builder/verifier/reference integration | Valid small modules evaluate; malformed modules fail; pinned coverage recorded |
-| 4 | Per-op GGML importer | Each supported mapping agrees with GGML CPU and preserves parameters |
-| 5 | Candidate matcher and legality checks (initial implementation complete) | Both spellings, capability and live guards checked through unmodified upstream interfaces; see [tests](m3-fusion.md) |
+| 1 (complete) | Metadata headers and semantic/interface contract | Consistent ABI, ownership, failure behavior and milestone boundaries |
+| 2 (complete) | Upstream graph integration | Scheduled views retain global uses; public evaluation callbacks and backend traces provide execution evidence |
+| 3 (complete) | StableHLO builder/verifier/reference integration | Valid small modules evaluate; malformed modules fail; pinned coverage recorded |
+| 4 (complete) | Per-op GGML importer | Each supported mapping agrees with GGML CPU and preserves parameters |
+| 5 (complete) | Candidate matcher and legality checks (initial implementation complete) | Both spellings, capability and live guards checked through unmodified upstream interfaces; see [tests](m3-fusion.md) |
 | 6 (complete) | [Standalone member support and placement](m3-pointwise.md) | Every assigned member executes legally; real FFN can occupy one split |
-| 7 | Full-region import and M3 acceptance | Real/synthetic FFN reference agreement and complete negative/lifetime cases |
+| 7 (complete) | [Full-region import and M3 acceptance](m3-ffn-acceptance.md) | Real/synthetic FFN reference agreement and complete negative/lifetime cases |
 | M4 | AOT FFN artifact, independent runner, then GGML execution | Three-way numerical agreement, artifact compatibility and real device evidence |
 | M5 | Shared AOT/JIT service, cache and optimization passes | Invalidation, before/after IR and numerical/structural evidence |
 

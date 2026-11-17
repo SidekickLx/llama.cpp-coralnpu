@@ -103,10 +103,20 @@ struct Fixture {
         const bool tail = name.find("tail") != std::string::npos;
         const bool shared = name.find("shared") != std::string::npos;
         const bool expanded = name.find("expanded") != std::string::npos || (!region && name != "ffn-split");
-        const int64_t m = name.find("decode") != std::string::npos ? 1 :
-                          name.find("prefill") != std::string::npos ? 5 : tail ? 3 : 2;
-        const int64_t d = tail ? 7 : 3;
-        const int64_t f = tail ? 11 : 4;
+        int64_t m = tail ? 3 : 2;
+        int64_t d = tail ? 7 : 3;
+        int64_t f = tail ? 11 : 4;
+        if (name.find("decode") != std::string::npos) {
+            m = 1;
+        } else if (name.find("prefill") != std::string::npos) {
+            m = 5;
+        }
+        if (name.rfind("ffn-region-profile-m", 0) == 0) {
+            m = std::stoll(name.substr(std::string("ffn-region-profile-m").size()));
+            Require(m == 1 || m == 16 || m == 32, "unknown contract profile");
+            d = 128;
+            f = 256;
+        }
         auto *x = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, d, m);
         auto *wg = ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, d, f);
         auto *wu = shared ? wg : ggml_new_tensor_2d(context.get(), GGML_TYPE_F32, d, f);

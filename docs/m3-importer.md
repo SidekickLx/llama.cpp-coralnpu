@@ -8,7 +8,7 @@ by the importer.
 
 ## Interfaces and ownership
 
-`compiler/ir/ggml_importer.h` provides three layers:
+`compiler/ir/ggml_importer.h` provides four entry points:
 
 - `ImportGGMLTensorType`: validates static F32, unbatched canonical dense layout
   and maps GGML `[columns, rows, 1, 1]` into StableHLO `[rows, columns]`.
@@ -18,6 +18,9 @@ by the importer.
 - `ImportGGMLFunction`: imports an explicit topological operation selection,
   with ordered boundary inputs and results. Dependencies must resolve to a
   boundary value or an earlier selected operation. Failure returns no module.
+- `ImportGGMLFFNFunction`: imports a complete split or expanded FFN with exactly
+  four positional roles, one result and a validated versioned FFN compile spec.
+  It reuses the per-node importer and standard MLIR verification.
 
 `GGMLImportRequest` holds references and identity metadata, not owned graph
 nodes. Input/operation tensor IDs must be unique, nonzero and representable as
@@ -28,15 +31,18 @@ ID, operator spelling and complete integer parameter words.
 
 The generic function has one argument per distinct boundary tensor. A producer
 outside the selection is not recursively imported. Duplicate source edges
-share the same SSA value. This function is not declared to implement the fixed
-four-position FFN ABI: a future FFN binder must preserve semantic roles, including
-identical/shared weights, when supplying operands to the per-node importer.
+share the same SSA value. The separate `GGMLFFNImportRequest` API supplies
+X/W_gate/W_up/W_down in contract order and checks their identities against
+the matched graph edges. It preserves four function arguments even for shared
+weights, selecting projection operands by their verified semantic role.
+It validates the exact member set, shape, version and numeric policy before
+reusing the standard importer. See [complete FFN acceptance](m3-ffn-acceptance.md).
 
 The importer rejects explicit views, noncanonical strides and backend-specific
 extra storage. It does not prove absence of overlapping physical allocations,
 external consumers, intermediate observation, or cross-backend splits.
-Those are future planner checks. Successful import does not authorize fusion
-or establish Coral support.
+Those belong to the [planner checks](m3-fusion.md). Successful import does not
+authorize fusion or establish Coral support.
 
 ## Initial MUL_MAT rule
 
@@ -173,6 +179,7 @@ M3 step 4 is complete for the admitted static F32 subset. Unsupported cases
 remain explicit errors. The importer provides semantic conversion and verified
 standard SSA; it does not infer fusion legality or change runtime placement.
 [FFN matching and legality checks](m3-fusion.md) are now implemented using
-unmodified upstream interfaces. Complete member support and real same-split
-placement are next. Full-region Coral compilation,
+unmodified upstream interfaces. Standalone member support, real same-split
+placement, and full-region CPU/StableHLO acceptance have also passed; see the
+[complete M3 report](m3-ffn-acceptance.md). Full-region Coral compilation,
 dispatch evidence and CPU/StableHLO/Coral three-way comparison belong to M4.

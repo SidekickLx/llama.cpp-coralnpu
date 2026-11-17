@@ -221,13 +221,17 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
    split SwiGLU execute through strict Coral VMFBs. Twenty real-model FFN member
    groups share complete backend compute ranges; callback/missing-artifact
    cases preserve legal individual execution. See [evidence](m3-pointwise.md).
-7. 将完整真实/合成 FFN 转换成标准 StableHLO，运行 verifier 和 CPU reference，
-   与 GGML CPU 对照；完成合法性、生命周期与拒绝用例，验收 M3。
+7. **Complete FFN import and M3 acceptance (complete)**: import complete
+   synthetic and real-model FFNs into standard StableHLO; verify and compare
+   the official reference interpreter with GGML CPU. The aggregate gate also
+   covers legality, lifetime, rejection paths and real Coral member placement.
+   See the [acceptance report](m3-ffn-acceptance.md).
 
 当前实现和验收证据见 [上游图接口](m3-graph-export.md)、
 [StableHLO 基础设施](m3-stablehlo.md) 与 [逐算子 importer](m3-importer.md)、[融合检查](m3-fusion.md)。
-Step 6 is complete on unmodified llama.cpp. Full-region reference acceptance
-remains step 7; M3 as a whole is not yet accepted. Fused device execution is M4.
+M3 is accepted for the documented static dense F32 subset on unmodified
+llama.cpp. Members execute separately on Coral. Complete FFN artifact
+compilation, independent reload and three-way device comparison remain M4.
 
 **融合合法性**
 
