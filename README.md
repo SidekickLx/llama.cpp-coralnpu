@@ -1,37 +1,45 @@
 # Llamacpp-coralNPU
 
-面向 llama.cpp / GGML 的 CoralNPU 后端实验项目，使用 IREE/MLIR 编译链与 MPACT 模拟器研究矩阵乘、FFN、编译产物管理及设备执行。
+An experimental CoralNPU backend for llama.cpp / GGML. The project uses the IREE/MLIR compiler stack and the MPACT simulator to explore matrix multiplication, feed-forward networks (FFNs), compiled artifact management, and device execution.
 
-## 当前状态
+## Current status
 
-M1 独立 C++ runtime 已完成编译和 MPACT 运行验证：三种 shape 的 Zvt/RVV 共六组配置通过，详见 [M1 验证记录](docs/m1-validation.md)。设备内部 staging 与完整分配统计仍待补充。GGML Coral backend、完整模型 NPU 推理、FFN/JIT/W4A8 和 Linux driver 尚待实现。详细范围见[工程实践计划](docs/project-plan.md)。
+The **M1 standalone C++ runtime** has been built and validated on MPACT. All six configurations across three matrix shapes and the Zvt/RVV profiles passed; see the [M1 validation report](docs/m1-validation.md). Device-internal staging measurements and complete allocation statistics remain to be implemented.
 
-已完成一次 CPU 模型、官方 matmul、严格 F32/MPACT 和 Renode 系统示例验证，摘要见[环境基线](docs/environment-baseline.md)。当前 M1 构建缓存、可执行文件及本机测试产物保留并由 Git 忽略；后续使用同一构建目录增量编译，不清理缓存。
+**M2** adds a GGML Coral adapter and a model runner. Short prefill and decode runs with the stories260K F32 model passed CPU/Coral numerical comparisons. See the [M2 runner guide](docs/m2-runner.md) and [M2 test and performance report](docs/m2-test-report.md). Dedicated synthetic graph tests for adapter edge cases are still pending. FFN subgraph compilation, JIT, W4A8, and the Linux driver remain future work. The [project plan](docs/project-plan.md) defines the full scope and acceptance criteria.
 
-## 目录
+The initial environment validation covered CPU model inference, the upstream matmul example, strict F32 execution on MPACT, and Renode system examples. Results are summarized in the [environment baseline](docs/environment-baseline.md). Simulator wall-clock measurements do not represent hardware NPU performance.
 
-- `docs/project-plan.md`：架构、阶段和验收标准。
-- `docs/environment-baseline.md`：工具版本与历史验证摘要。
-- `dependencies.lock.json`：公开上游地址、固定 revision、补丁及模型校验值。
-- `CONTRIBUTING.md`：贡献约定。
-- src/runtime/：M1 C++ runtime 适配层与命令行 runner。
-- compiler/export_matmul.py：导出固定 shape 的 F32 StableHLO matmul。
-- docs/m1-runtime.md：tensor ABI、生命周期、统计口径与构建验证步骤。
-- docs/m1-validation.md：本次 M1 实际验证结果和限制。
-- tests/runtime/verify_m1.py：运行六组已编译产物、文件 I/O 与拒绝用例。
-- CMakeLists.txt：runtime 构建入口和可选 CTest 注册。
+Local build caches, executables, and test artifacts are retained and excluded from Git. Reuse the existing build directories for incremental builds; do not clean or delete the caches.
 
-`repos/` 用于本机上游源码副本，`tools/` 和 `.venv/` 用于本机工具环境；这些目录由 `.gitignore` 排除，不属于本仓库的发布内容。
+## Repository layout
 
-## 开发起点
+- [docs/project-plan.md](docs/project-plan.md): Architecture, milestones, and acceptance criteria.
+- [docs/environment-baseline.md](docs/environment-baseline.md): Tool versions and historical validation results.
+- [dependencies.lock.json](dependencies.lock.json): Public upstream URLs, pinned revisions, patches, and model checksums.
+- [CONTRIBUTING.md](CONTRIBUTING.md): Contribution guidelines.
+- [src/runtime/](src/runtime/): M1 C++ runtime adapter and standalone matmul runner.
+- [src/ggml/](src/ggml/): M2 GGML Coral adapter and model runner.
+- [docs/m2-runner.md](docs/m2-runner.md): Model execution, profile compilation, and CPU/Coral comparison procedures.
+- [docs/m2-test-report.md](docs/m2-test-report.md): Model tests, execution evidence, and repeated performance measurements.
+- [tests/ggml/verify_runner.py](tests/ggml/verify_runner.py): Fixed-token replay, model numerical checks, and failure-path validation.
+- [compiler/export_matmul.py](compiler/export_matmul.py): Static-shape F32 matmul export to StableHLO.
+- [docs/m1-runtime.md](docs/m1-runtime.md): Tensor ABI, resource lifetimes, metric definitions, and build/validation instructions.
+- [docs/m1-validation.md](docs/m1-validation.md): M1 validation results and limitations.
+- [tests/runtime/verify_m1.py](tests/runtime/verify_m1.py): Validation of six precompiled configurations, file I/O, and rejection cases.
+- [CMakeLists.txt](CMakeLists.txt): Runtime build entry point and optional CTest registration.
 
-1. 准备 Linux x86_64 环境；Windows 可使用 WSL2。工具版本参考环境基线。
-2. 根据 `dependencies.lock.json` 克隆并检出固定版本。以 `coralnpu-compiler` 为依赖根，初始化其配套子模块并应用该版本自带的官方补丁。
-3. 按[固定版本的官方构建说明](https://github.com/google-coral/coralnpu-compiler/blob/770dc9332dffed8ff91d8cface7e9d176227d912/README.md)构建编译器、运行时及 matmul 示例。使用 `--config=dev`，按本机资源选择并行度。
-4. 先验证官方 Zvt/RVV matmul；严格 F32 检查显式设置 `--coralnpu-fast-math=false`。之后按工程计划实现后端。
+Local upstream checkouts live in `repos/`; local tools and Python environments live in `tools/` and `.venv/`. These directories are excluded by `.gitignore` and are not part of the published repository.
 
-M1 的构建、运行方式及剩余任务见 [M1 runner 说明](docs/m1-runtime.md)。此仓库目前不提供独立可安装的 GGML 后端。
+## Getting started
 
-## 许可证
+1. Set up a Linux x86_64 environment; WSL2 is supported on Windows. Use the tool versions listed in the environment baseline.
+2. Clone and check out the revisions pinned in `dependencies.lock.json`. Use `coralnpu-compiler` as the dependency root, initialize its matching submodules, and apply the official patches shipped with that revision.
+3. Follow the [pinned upstream build instructions](https://github.com/google-coral/coralnpu-compiler/blob/770dc9332dffed8ff91d8cface7e9d176227d912/README.md) to build the compiler, runtime, and matmul examples. Use `--config=dev` and choose build parallelism appropriate for the host.
+4. Validate the upstream Zvt/RVV matmul examples first. Explicitly set `--coralnpu-fast-math=false` for strict F32 checks, then continue with the backend milestones in the project plan.
 
-本项目原创内容采用 [MIT](LICENSE) 许可证。引用或在本机下载的上游项目和模型保留各自的许可证；本仓库不重新授权这些第三方内容。
+See the [M1 runner guide](docs/m1-runtime.md) for build instructions, execution commands, and remaining work. This repository does not yet provide a standalone installable GGML backend package.
+
+## License
+
+Original work in this project is licensed under the [MIT License](LICENSE). Referenced or locally downloaded upstream projects and models retain their own licenses; this repository does not relicense those third-party materials.
