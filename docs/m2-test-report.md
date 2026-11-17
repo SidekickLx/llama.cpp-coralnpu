@@ -10,8 +10,8 @@
 
 ## 1. 测试对象与输入
 
-- Git 基点：`fa601d7`，adapter 已提交。runner 与测试脚本仍为工作区改动，
-  因而仅靠 commit ID 不能复现本次结果；完整源码/可执行文件/VMFB SHA256 见 [证据清单](m2-test-evidence.json)。
+- 原始测量时的 Git 基点为 `fa601d7`，当时 runner 与测试脚本尚未提交；现已提交为 `34aecf0`。
+  完整源码/可执行文件/VMFB SHA256 见 [证据清单](m2-test-evidence.json)，保留原始测量身份。
 - 模型：`stories260K-f32.gguf`，1,185,376 字节，词表 512；
   SHA256：`270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d`。
 - runner 二进制 SHA256：`d431b5c66c59972650bdb2281cfc579aaac409f7c3b211ca88ed4a9fe93986c7`。
@@ -182,7 +182,7 @@ M=5/K=64/N=172 的 8 次调用占 prefill 指令数约 **82.4%**，是后续检�
 | shape 匹配但 VMFB 损坏 | 通过：非零退出，无成功结果 | `coral-llama-runner: llama_decode failed (-3): load VMFB: iree/runtime/src/iree/vm/bytecode/archive.c:106: INVALID_ARGUMENT; FlatBuffer data is not present or less than 16 bytes (10 total)` |
 
 缺失/损坏产物不会伪装为成功运行；没有实际 NPU dispatch 的 Coral 模式也会失败。
-这些是 runner 集成测试，不等于完整 adapter 边界测试。
+这些是 runner 集成测试；后续补齐的独立 adapter 边界测试见 [验收记录](m2-adapter-validation.md)。
 
 ## 6. 可追溯文件与复现
 
@@ -222,8 +222,10 @@ python tests/ggml/benchmark_runner.py \
 ## 7. 验收边界与后续
 
 本报告确认小模型推理调用链、严格 F32 Coral matmul、固定 token 数值对照、实际 dispatch、
-权重复用以及 runner 失败传播。M2 的 dtype/stride/广播/precision/可变权重等专门合成图回归仍需补齐。
-未覆盖其他模型、长上下文、多线程/并发、完整模型 RVV-only 对照及硬件执行。
+权重复用以及 runner 失败传播。后续 [独立 adapter 验证](m2-adapter-validation.md) 已补齐
+原计划的 dtype/stride/广播/precision/可变权重等边界：23 个独立进程、95 项检查全部通过。
+两份报告共同满足当前 M2 / v0.1 功能验收范围。未覆盖其他模型、长上下文、多线程/并发、
+完整模型 RVV-only 对照及硬件执行。本报告性能数据未变，仍对应原始测量。
 
 后续性能工作宜先细分 VM 调用内的耗时，再检查高指令数 shape；FFN 融合与减少中间回读
 是可测的优化方向。当前数据没有证明这些改动的收益，也不能以本机模拟器时间选择真实硬件最优方案。

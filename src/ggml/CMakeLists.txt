@@ -29,3 +29,21 @@ add_executable(coral-llama-runner llama_runner.cc)
 target_link_libraries(coral-llama-runner PRIVATE ggml-coral llama)
 target_compile_options(coral-llama-runner PRIVATE -Wall -Wextra -fexceptions)
 set_target_properties(coral-llama-runner PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+if(BUILD_TESTING)
+    add_executable(coral-adapter-test "${PROJECT_SOURCE_DIR}/tests/ggml/adapter_test.cc")
+    target_include_directories(coral-adapter-test PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
+    target_link_libraries(coral-adapter-test PRIVATE ggml-coral)
+    target_compile_options(coral-adapter-test PRIVATE -Wall -Wextra -fexceptions)
+    set_target_properties(coral-adapter-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    if(M1_VMFB_M1 AND M1_VMFB_M16)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME m2_adapter_boundaries
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/ggml/verify_adapter.py"
+                --runner "$<TARGET_FILE:coral-adapter-test>"
+                --m1-vmfb "${M1_VMFB_M1}"
+                --m16-vmfb "${M1_VMFB_M16}"
+                --output-root "${CMAKE_BINARY_DIR}/../m2-results")
+        set_tests_properties(m2_adapter_boundaries PROPERTIES TIMEOUT 300)
+    endif()
+endif()

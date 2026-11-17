@@ -4,7 +4,8 @@
 再由 GGML scheduler 调用 `ggml-coral`。runner 不手动拆分 Transformer，不在推理时调用编译器。
 本阶段用于检查数值和执行位置，不是性能 benchmark。
 
-adapter 已单独提交为 `fa601d7`。runner、验证脚本和本说明是后续改动。
+adapter 已单独提交为 `fa601d7`；runner、模型验证脚本和报告已提交为 `34aecf0`。
+独立 adapter 验证见 [M2 验收记录](m2-adapter-validation.md)。
 
 ## 两种运行模式
 
@@ -163,8 +164,8 @@ python tests/ggml/verify_runner.py \
 - 检查已有结果目录、损坏 token 文件、词表外 token、缺失产物、完全无 offload 和损坏 VMFB 的失败路径。
 
 每轮验证在 `build/m2-results/runner-*` 新建目录，保存 stdout/stderr 和验证报告。
-这覆盖模型 runner 的集成行为；adapter 对各类 dtype、stride、广播、精度参数及
-可变权重的专门合成图回归仍是 M2 后续工作。
+这覆盖模型 runner 的集成行为；adapter 的 dtype、stride、广播、精度参数及
+可变权重边界现已由独立合成图回归补齐，见 [M2 验收记录](m2-adapter-validation.md)。
 
 ## 本次集成验证（2026-11-16）
 
@@ -189,5 +190,5 @@ CPU 固定 token 重放的 logits 完全一致；Coral 与 CPU 的 2048 个 logi
 正例的 host executable 加载尝试、失败 dispatch 和 observer 错误均为 0。
 推理验证进程的 PATH 中没有编译器或 shell。
 
-这些结果说明小模型 runner 的调用链可用，不代表已覆盖 M2 的全部 shape/layout/precision
-拒绝组合，也不代表硬件性能或完整设备内存统计已验收。
+这些模型结果与后续 [独立 adapter 验证](m2-adapter-validation.md) 共同构成 M2 / v0.1 的功能验收证据。
+硬件性能和完整设备内存统计不在本次验收范围。

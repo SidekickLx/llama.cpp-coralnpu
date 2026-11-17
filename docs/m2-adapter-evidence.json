@@ -1,0 +1,688 @@
+{
+  "status": "passed",
+  "cases": 23,
+  "checks": 95,
+  "atol": 1e-06,
+  "rtol": 1e-05,
+  "max_abs_error": 0,
+  "matmuls": 22,
+  "dispatches": 43,
+  "kernel_instructions": 6171,
+  "runner_sha256": "eff0a9fdc0f926a143bfcb4806052b23d4b831408b2da4c605904003df61c011",
+  "vmfb_sha256": {
+    "m1": "ab3f2cfa0c01b7b26c298e47e2b7db244b9da3fd7ff56ba81c6ebeb767249cf9",
+    "m16": "0ac15fa6316e8a3f5a137d9124274be8d1e028d8a1f5dccc4571bde5e3a96d84"
+  },
+  "results": [
+    {
+      "case": "capabilities",
+      "status": "passed",
+      "checks": [
+        "default_precision",
+        "explicit_f32",
+        "dtype_f16_slot_0",
+        "dtype_f16_slot_1",
+        "dtype_f16_slot_2",
+        "dtype_bf16_slot_0",
+        "dtype_bf16_slot_1",
+        "dtype_bf16_slot_2",
+        "dtype_q4_0_slot_0",
+        "dtype_q4_0_slot_1",
+        "dtype_q4_0_slot_2",
+        "row_stride_slot_0",
+        "row_stride_slot_1",
+        "row_stride_slot_2",
+        "batch_axis_2_slot_0",
+        "batch_axis_3_slot_0",
+        "extra_slot_0",
+        "batch_axis_2_slot_1",
+        "batch_axis_3_slot_1",
+        "extra_slot_1",
+        "batch_axis_2_slot_2",
+        "batch_axis_3_slot_2",
+        "extra_slot_2",
+        "acc_precision_15",
+        "src_precision_15",
+        "acc_precision_20",
+        "src_precision_20",
+        "acc_precision_30",
+        "src_precision_30",
+        "acc_precision_40",
+        "src_precision_40",
+        "unknown_parameter_0",
+        "unknown_parameter_1",
+        "unknown_parameter_2",
+        "unknown_parameter_3",
+        "unknown_parameter_4",
+        "unknown_parameter_5",
+        "unknown_parameter_6",
+        "unknown_parameter_7",
+        "unknown_parameter_8",
+        "unknown_parameter_9",
+        "unknown_parameter_10",
+        "unknown_parameter_11",
+        "unknown_parameter_12",
+        "unknown_parameter_13",
+        "unknown_parameter_14",
+        "unknown_parameter_15",
+        "hadamard_hint",
+        "missing_shape_profile",
+        "zero_extent",
+        "negative_extent",
+        "oversized_tensor",
+        "contracting_dimension_mismatch",
+        "output_shape_mismatch",
+        "inner_stride",
+        "other_operation",
+        "null_source_0",
+        "null_source_1",
+        "null_operation",
+        "buffer_types_host_nonhost_null",
+        "queries_without_artifact_files_or_execution"
+      ],
+      "placements": [],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "dense_decode",
+      "status": "passed",
+      "checks": [
+        "dense_decode_run_0"
+      ],
+      "placements": [
+        "CORAL"
+      ],
+      "events": [
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 1,
+      "module_loads": 1,
+      "dispatches": 2,
+      "instruction_samples": 2,
+      "kernel_instructions": 283,
+      "weight_preparations": 1,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "dense_prefill",
+      "status": "passed",
+      "checks": [
+        "dense_prefill_run_0"
+      ],
+      "placements": [
+        "CORAL"
+      ],
+      "events": [
+        {
+          "dispatches": 1,
+          "instructions": 228,
+          "weight_cache_hit": false
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 1,
+      "module_loads": 1,
+      "dispatches": 1,
+      "instruction_samples": 1,
+      "kernel_instructions": 228,
+      "weight_preparations": 1,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "explicit_f32",
+      "status": "passed",
+      "checks": [
+        "explicit_f32_run_0"
+      ],
+      "placements": [
+        "CORAL"
+      ],
+      "events": [
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 1,
+      "module_loads": 1,
+      "dispatches": 2,
+      "instruction_samples": 2,
+      "kernel_instructions": 283,
+      "weight_preparations": 1,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "weight_stride",
+      "status": "passed",
+      "checks": [
+        "weight_stride_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "activation_stride",
+      "status": "passed",
+      "checks": [
+        "activation_stride_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "f16_weight",
+      "status": "passed",
+      "checks": [
+        "f16_weight_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "bf16_weight",
+      "status": "passed",
+      "checks": [
+        "bf16_weight_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "broadcast",
+      "status": "passed",
+      "checks": [
+        "broadcast_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "batch3d",
+      "status": "passed",
+      "checks": [
+        "batch3d_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "precision_bf16_acc",
+      "status": "passed",
+      "checks": [
+        "precision_bf16_acc_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "precision_f16_acc",
+      "status": "passed",
+      "checks": [
+        "precision_f16_acc_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "precision_bf16_src",
+      "status": "passed",
+      "checks": [
+        "precision_bf16_src_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "precision_q8_src",
+      "status": "passed",
+      "checks": [
+        "precision_q8_src_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "missing_profile",
+      "status": "passed",
+      "checks": [
+        "missing_profile_run_0"
+      ],
+      "placements": [
+        "CPU"
+      ],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "mixed_graph",
+      "status": "passed",
+      "checks": [
+        "mixed_graph_run_0"
+      ],
+      "placements": [
+        "CORAL",
+        "CPU"
+      ],
+      "events": [
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 1,
+      "module_loads": 1,
+      "dispatches": 2,
+      "instruction_samples": 2,
+      "kernel_instructions": 283,
+      "weight_preparations": 1,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "cache_default_mutable",
+      "status": "passed",
+      "checks": [
+        "cache_default_mutable_run_0",
+        "cache_default_mutable_run_1",
+        "cache_default_mutable_run_2"
+      ],
+      "placements": [
+        "CORAL"
+      ],
+      "events": [
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 3,
+      "module_loads": 1,
+      "dispatches": 6,
+      "instruction_samples": 6,
+      "kernel_instructions": 849,
+      "weight_preparations": 3,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "cache_optin_mutable",
+      "status": "passed",
+      "checks": [
+        "cache_optin_mutable_run_0",
+        "cache_optin_mutable_run_1",
+        "cache_optin_mutable_run_2"
+      ],
+      "placements": [
+        "CORAL"
+      ],
+      "events": [
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 3,
+      "module_loads": 1,
+      "dispatches": 6,
+      "instruction_samples": 6,
+      "kernel_instructions": 849,
+      "weight_preparations": 3,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "cache_view_mutable",
+      "status": "passed",
+      "checks": [
+        "cache_view_mutable_run_0",
+        "cache_view_mutable_run_1",
+        "cache_view_mutable_run_2"
+      ],
+      "placements": [
+        "CORAL"
+      ],
+      "events": [
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 3,
+      "module_loads": 1,
+      "dispatches": 6,
+      "instruction_samples": 6,
+      "kernel_instructions": 849,
+      "weight_preparations": 3,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "cache_view_readonly",
+      "status": "passed",
+      "checks": [
+        "cache_view_readonly_run_0",
+        "cache_view_readonly_run_1",
+        "cache_view_readonly_run_2"
+      ],
+      "placements": [
+        "CORAL"
+      ],
+      "events": [
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 3,
+      "module_loads": 1,
+      "dispatches": 6,
+      "instruction_samples": 6,
+      "kernel_instructions": 849,
+      "weight_preparations": 3,
+      "weight_cache_hits": 0,
+      "expected_failures": 0
+    },
+    {
+      "case": "cache_immutable",
+      "status": "passed",
+      "checks": [
+        "cache_immutable_run_0",
+        "cache_immutable_run_1",
+        "cache_immutable_run_2"
+      ],
+      "placements": [
+        "CORAL",
+        "CORAL"
+      ],
+      "events": [
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": false
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": true
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": true
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": true
+        },
+        {
+          "dispatches": 2,
+          "instructions": 283,
+          "weight_cache_hit": true
+        }
+      ],
+      "max_abs_error": 0,
+      "matmuls": 6,
+      "module_loads": 1,
+      "dispatches": 12,
+      "instruction_samples": 12,
+      "kernel_instructions": 1698,
+      "weight_preparations": 2,
+      "weight_cache_hits": 4,
+      "expected_failures": 0
+    },
+    {
+      "case": "preflight_failure",
+      "status": "passed",
+      "checks": [
+        "failure_preserves_all_outputs",
+        "failed_backend_stays_failed"
+      ],
+      "placements": [],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 2
+    },
+    {
+      "case": "abi_failure",
+      "status": "passed",
+      "checks": [
+        "failure_preserves_all_outputs",
+        "failed_backend_stays_failed"
+      ],
+      "placements": [],
+      "events": [],
+      "max_abs_error": 0,
+      "matmuls": 0,
+      "module_loads": 0,
+      "dispatches": 0,
+      "instruction_samples": 0,
+      "kernel_instructions": 0,
+      "weight_preparations": 0,
+      "weight_cache_hits": 0,
+      "expected_failures": 2
+    }
+  ],
+  "schema": "coral-m2-adapter-validation-v1",
+  "report_date": "2026-11-16",
+  "base_commit": "34aecf0f89f562712368b23fbe989d468a6c679f",
+  "local_evidence_path": "build/m2-results/adapter-ypwxcfb0",
+  "source_sha256": {
+    "tests/ggml/adapter_test.cc": "0851cd4c718c113bfc1c9ecda036fa4cf767885bcda64892eb18039b3457090e",
+    "tests/ggml/verify_adapter.py": "9ddee1575a5a8d4a1b917d23a195ed2a60b84f687b59d68213899de63bdf0bc2",
+    "src/ggml/CMakeLists.txt": "d73baba4e9b1508193906f31a1fa021aabccb65806f0372da8973e7573986724",
+    "src/ggml/ggml_coral.cc": "5c25c026df9760b9f6de3ab96fa701facb851c572e71b8dd48ffe6bf972acd8b",
+    "src/ggml/ggml_coral.h": "351e4732d9d7f5b678329aafe86fa4ec1f28c6dffb73131dbaba902447b84662",
+    "src/runtime/matmul_runtime.cc": "85de0c460d3cd64e35ef1819508b60f755735e322d27c134b2d7be585f24ed13",
+    "src/runtime/matmul_runtime.h": "18733f57bd747c7506453b47a08d58396d2d2b41317df81563a441c256011219"
+  },
+  "ctest": {
+    "passed": 4,
+    "total": 4,
+    "names": [
+      "m1_matmul_m1",
+      "m1_matmul_m16",
+      "m1_matmul_m32",
+      "m2_adapter_boundaries"
+    ]
+  }
+}

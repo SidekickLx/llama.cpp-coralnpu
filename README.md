@@ -6,7 +6,7 @@ An experimental CoralNPU backend for llama.cpp / GGML. The project uses the IREE
 
 The **M1 standalone C++ runtime** has been built and validated on MPACT. All six configurations across three matrix shapes and the Zvt/RVV profiles passed; see the [M1 validation report](docs/m1-validation.md). Device-internal staging measurements and complete allocation statistics remain to be implemented.
 
-**M2** adds a GGML Coral adapter and a model runner. Short prefill and decode runs with the stories260K F32 model passed CPU/Coral numerical comparisons. See the [M2 runner guide](docs/m2-runner.md) and [M2 test and performance report](docs/m2-test-report.md). Dedicated synthetic graph tests for adapter edge cases are still pending. FFN subgraph compilation, JIT, W4A8, and the Linux driver remain future work. The [project plan](docs/project-plan.md) defines the full scope and acceptance criteria.
+**M2** adds a GGML Coral adapter and a model runner. Short prefill and decode runs with the stories260K F32 model passed CPU/Coral numerical comparisons. See the [M2 runner guide](docs/m2-runner.md) and [M2 test and performance report](docs/m2-test-report.md). Dedicated adapter boundary validation also passed: 23 isolated cases cover layout/dtype/precision rejection, CPU routing, mutable weights, cache reuse, and failure propagation. See the [M2 adapter validation report](docs/m2-adapter-validation.md). Together, these results satisfy the current M2 / v0.1 functional acceptance criteria. FFN subgraph compilation, JIT, W4A8, and the Linux driver remain future work. The [project plan](docs/project-plan.md) defines the full scope and acceptance criteria.
 
 The initial environment validation covered CPU model inference, the upstream matmul example, strict F32 execution on MPACT, and Renode system examples. Results are summarized in the [environment baseline](docs/environment-baseline.md). Simulator wall-clock measurements do not represent hardware NPU performance.
 
@@ -22,6 +22,7 @@ Local build caches, executables, and test artifacts are retained and excluded fr
 - [src/ggml/](src/ggml/): M2 GGML Coral adapter and model runner.
 - [docs/m2-runner.md](docs/m2-runner.md): Model execution, profile compilation, and CPU/Coral comparison procedures.
 - [docs/m2-test-report.md](docs/m2-test-report.md): Model tests, execution evidence, and repeated performance measurements.
+- [tests/ggml/verify_adapter.py](tests/ggml/verify_adapter.py): Independent adapter boundary, routing, weight-cache, and failure checks using retained M1 artifacts.
 - [tests/ggml/verify_runner.py](tests/ggml/verify_runner.py): Fixed-token replay, model numerical checks, and failure-path validation.
 - [compiler/export_matmul.py](compiler/export_matmul.py): Static-shape F32 matmul export to StableHLO.
 - [docs/m1-runtime.md](docs/m1-runtime.md): Tensor ABI, resource lifetimes, metric definitions, and build/validation instructions.
