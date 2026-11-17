@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+cc_library(
+    name = "contracts",
+    hdrs = ["src/contracts/ffn_contract.h"],
+    includes = ["src"],
+    visibility = ["//visibility:public"],
+)

@@ -654,4 +654,5 @@ downloaded upstream projects and models retain their respective licenses;
 this repository does not relicense third-party materials.
 
 M3 development: [interface and semantic contract](docs/m3-contracts.md) and
-[real GGML graph export](docs/m3-graph-export.md).
+[real GGML graph export](docs/m3-graph-export.md), plus
+[StableHLO construction and verification](docs/m3-stablehlo.md).

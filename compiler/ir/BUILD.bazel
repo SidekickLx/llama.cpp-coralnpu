@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "stablehlo_program",
+    srcs = ["stablehlo_program.cc"],
+    hdrs = ["stablehlo_program.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//:contracts",
+        "@stablehlo//:stablehlo_ops",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_binary(
+    name = "coral-stablehlo-tool",
+    srcs = ["stablehlo_tool.cc"],
+    deps = [
+        ":stablehlo_program",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
