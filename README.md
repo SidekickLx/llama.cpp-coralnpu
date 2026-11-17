@@ -660,3 +660,5 @@ this repository does not relicense third-party materials.
 M3 development: [interface and semantic contract](docs/m3-contracts.md) and
 [real GGML graph export](docs/m3-graph-export.md), plus
 [StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md).
+
+[GGML importer interfaces and tests](docs/m3-importer.md).

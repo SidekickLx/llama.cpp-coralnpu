@@ -4,8 +4,8 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 cc_library(
     name = "stablehlo_program",
-    srcs = ["stablehlo_program.cc"],
-    hdrs = ["stablehlo_program.h"],
+    srcs = ["stablehlo_program.cc", "stablehlo_ops.cc"],
+    hdrs = ["stablehlo_program.h", "stablehlo_ops.h"],
     visibility = ["//visibility:public"],
     deps = [
         "//:contracts",
@@ -52,6 +52,38 @@ cc_binary(
     deps = [
         ":stablehlo_program",
         ":reference",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_library(
+    name = "ggml_importer",
+    srcs = ["ggml_importer.cc"],
+    hdrs = ["ggml_importer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":stablehlo_program",
+        "//:contracts",
+        "//:ggml_headers",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_binary(
+    name = "libcoral-importer-check.so",
+    testonly = True,
+    linkshared = True,
+    srcs = ["//:tests/compiler/importer_check.cc"],
+    deps = [
+        ":ggml_importer",
+        ":reference",
+        ":stablehlo_program",
+        "//:ggml_fixture_api",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",

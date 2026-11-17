@@ -6,3 +6,21 @@ cc_library(
     includes = ["src"],
     visibility = ["//visibility:public"],
 )
+
+# Header-only ABI dependency. The importer reads metadata, not tensor payloads.
+cc_library(
+    name = "ggml_headers",
+    hdrs = ["repos/llama.cpp/ggml/include/ggml.h"],
+    strip_include_prefix = "repos/llama.cpp/ggml/include",
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "ggml_fixture_api",
+    testonly = True,
+    hdrs = ["tests/compiler/ggml_fixture.h"],
+    deps = [":ggml_headers"],
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["tests/compiler/importer_check.cc"])

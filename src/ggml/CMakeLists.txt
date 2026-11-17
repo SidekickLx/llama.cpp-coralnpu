@@ -41,6 +41,12 @@ target_compile_options(coral-llama-runner PRIVATE -Wall -Wextra -fexceptions)
 set_target_properties(coral-llama-runner PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 if(BUILD_TESTING)
+    add_executable(coral-ggml-import-test "${PROJECT_SOURCE_DIR}/tests/compiler/ggml_fixture.cc")
+    target_include_directories(coral-ggml-import-test PRIVATE "${PROJECT_SOURCE_DIR}")
+    target_link_libraries(coral-ggml-import-test PRIVATE ggml ${CMAKE_DL_LIBS})
+    target_compile_options(coral-ggml-import-test PRIVATE -Wall -Wextra -fexceptions)
+    set_target_properties(coral-ggml-import-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
     add_executable(coral-adapter-test "${PROJECT_SOURCE_DIR}/tests/ggml/adapter_test.cc")
     target_include_directories(coral-adapter-test PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
     target_link_libraries(coral-adapter-test PRIVATE ggml-coral)

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "stablehlo_program.h"
+#include "stablehlo_ops.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -20,31 +21,6 @@ bool ValidMatrix(int64_t rows, int64_t columns) {
            rows <= std::numeric_limits<int64_t>::max() / columns;
 }
 
-Value Dot(OpBuilder &builder, Location loc, RankedTensorType result,
-          Value activation, Value weight) {
-    // GGML stores weights as [N,K]. Both contracting dimensions are 1;
-    // no transpose node, batch dimension, or implicit broadcast is needed.
-    const auto dims = hlo::DotDimensionNumbersAttr::get(
-        builder.getContext(), {}, {}, {1}, {1});
-    const auto precision = hlo::PrecisionAttr::get(
-        builder.getContext(), hlo::Precision::DEFAULT);
-    return builder.create<hlo::DotGeneralOp>(
-        loc, result, activation, weight, dims,
-        builder.getArrayAttr({precision, precision}), hlo::DotAlgorithmAttr{});
-}
-
-Value Silu(OpBuilder &builder, Location loc, Value input) {
-    const auto type = llvm::cast<RankedTensorType>(input.getType());
-    const auto scalar_type = RankedTensorType::get({}, builder.getF32Type());
-    const auto one_attr = DenseElementsAttr::get(scalar_type, builder.getF32FloatAttr(1.0));
-    const mlir::Value one = builder.create<hlo::ConstantOp>(loc, one_attr);
-    const mlir::Value broadcast = builder.create<hlo::BroadcastInDimOp>(
-        loc, type, one, builder.getDenseI64ArrayAttr({}));
-    const mlir::Value negative = builder.create<hlo::NegOp>(loc, input);
-    const mlir::Value exponential = builder.create<hlo::ExpOp>(loc, negative);
-    const mlir::Value denominator = builder.create<hlo::AddOp>(loc, broadcast, exponential);
-    return builder.create<hlo::DivOp>(loc, input, denominator);
-}
 } // namespace
 
 void RegisterDialects(mlir::MLIRContext &context) {
@@ -74,7 +50,7 @@ mlir::OwningOpRef<mlir::ModuleOp> BuildMatmul(
     module->push_back(function);
     auto *block = function.addEntryBlock();
     builder.setInsertionPointToStart(block);
-    const auto result = Dot(builder, loc, y, block->getArgument(0), block->getArgument(1));
+    const auto result = BuildDenseDot(builder, loc, y, block->getArgument(0), block->getArgument(1));
     builder.create<mlir::func::ReturnOp>(loc, result);
     if (mlir::failed(VerifyModule(*module))) {
         return {};
@@ -109,11 +85,11 @@ mlir::OwningOpRef<mlir::ModuleOp> BuildFFN(
     module->push_back(function);
     auto *block = function.addEntryBlock();
     builder.setInsertionPointToStart(block);
-    const auto gate = Dot(builder, loc, hidden_type, block->getArgument(0), block->getArgument(1));
-    const auto up = Dot(builder, loc, hidden_type, block->getArgument(0), block->getArgument(2));
-    const auto activated_gate = Silu(builder, loc, gate);
+    const auto gate = BuildDenseDot(builder, loc, hidden_type, block->getArgument(0), block->getArgument(1));
+    const auto up = BuildDenseDot(builder, loc, hidden_type, block->getArgument(0), block->getArgument(2));
+    const auto activated_gate = BuildSilu(builder, loc, gate);
     const mlir::Value hidden = builder.create<mlir::stablehlo::MulOp>(loc, activated_gate, up);
-    const auto result = Dot(builder, loc, x, hidden, block->getArgument(3));
+    const auto result = BuildDenseDot(builder, loc, x, hidden, block->getArgument(3));
     builder.create<mlir::func::ReturnOp>(loc, result);
     if (mlir::failed(VerifyModule(*module))) {
         return {};
