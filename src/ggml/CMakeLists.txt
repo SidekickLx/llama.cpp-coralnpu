@@ -37,6 +37,11 @@ target_compile_options(coral-llama-runner PRIVATE -Wall -Wextra -fexceptions)
 set_target_properties(coral-llama-runner PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 if(BUILD_TESTING)
+    add_executable(coral-pointwise-test "${PROJECT_SOURCE_DIR}/tests/ggml/pointwise_test.cc")
+    target_link_libraries(coral-pointwise-test PRIVATE ggml coral_m1_runtime)
+    target_compile_options(coral-pointwise-test PRIVATE -Wall -Wextra -fexceptions)
+    set_target_properties(coral-pointwise-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
     add_executable(coral-ffn-planner-test "${PROJECT_SOURCE_DIR}/tests/ggml/ffn_planner_test.cc")
     target_include_directories(coral-ffn-planner-test SYSTEM PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
     target_link_libraries(coral-ffn-planner-test PRIVATE coral-ffn-planner)

@@ -8,6 +8,27 @@ int main(int argc, char **argv) {
         auto module = coral::compiler::ReadModule(context, argv[2]);
         return module ? 0 : 1;
     }
+    if (argc == 6 && llvm::StringRef(argv[1]) == "emit-pointwise") {
+        coral::contracts::PointwiseSpec spec;
+        const llvm::StringRef kind(argv[2]);
+        if (kind == "silu") {
+            spec.kind = coral::contracts::PointwiseKind::Silu;
+        } else if (kind == "multiply") {
+            spec.kind = coral::contracts::PointwiseKind::Multiply;
+        } else if (kind == "swiglu") {
+            spec.kind = coral::contracts::PointwiseKind::SwiGLU;
+        } else {
+            llvm::errs() << "unknown pointwise operation\n";
+            return 1;
+        }
+        if (llvm::StringRef(argv[3]).getAsInteger(10, spec.rows) ||
+            llvm::StringRef(argv[4]).getAsInteger(10, spec.cols)) {
+            llvm::errs() << "dimensions must be unsigned decimal integers\n";
+            return 1;
+        }
+        auto module = coral::compiler::BuildPointwise(context, spec);
+        return !module || mlir::failed(coral::compiler::WriteModule(*module, argv[5])) ? 1 : 0;
+    }
     if (argc == 6) {
         int64_t a = 0, b = 0, c = 0;
         if (llvm::StringRef(argv[2]).getAsInteger(10, a) ||
@@ -35,6 +56,7 @@ int main(int argc, char **argv) {
     }
     llvm::errs() << "Usage: coral-stablehlo-tool emit-ffn M D F NEW_FILE\n"
                  << "       coral-stablehlo-tool emit-matmul M K N NEW_FILE\n"
+                 << "       coral-stablehlo-tool emit-pointwise silu|multiply|swiglu M N NEW_FILE\n"
                  << "       coral-stablehlo-tool verify FILE\n";
     return 1;
 }

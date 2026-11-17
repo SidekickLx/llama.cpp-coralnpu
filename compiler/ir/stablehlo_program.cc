@@ -58,6 +58,46 @@ mlir::OwningOpRef<mlir::ModuleOp> BuildMatmul(
     return module;
 }
 
+mlir::OwningOpRef<mlir::ModuleOp> BuildPointwise(
+    mlir::MLIRContext &context, const contracts::PointwiseSpec &spec) {
+    RegisterDialects(context);
+    mlir::OpBuilder builder(&context);
+    const auto loc = builder.getUnknownLoc();
+    // The CLI validates the bounded static ABI before entering this builder.
+    // Recheck here for callers using the library directly.
+    constexpr std::size_t limit = 2147483647 / sizeof(float);
+    if (!spec.rows || !spec.cols || spec.cols > limit || spec.rows > limit / spec.cols ||
+        (spec.kind != contracts::PointwiseKind::Silu &&
+         spec.kind != contracts::PointwiseKind::Multiply &&
+         spec.kind != contracts::PointwiseKind::SwiGLU)) {
+        mlir::emitError(loc, "invalid pointwise specification");
+        return {};
+    }
+    mlir::OwningOpRef<mlir::ModuleOp> module(mlir::ModuleOp::create(loc));
+    const auto type = mlir::RankedTensorType::get(
+        {static_cast<int64_t>(spec.rows), static_cast<int64_t>(spec.cols)}, builder.getF32Type());
+    llvm::SmallVector<mlir::Type> inputs(spec.Arity(), type);
+    auto function = mlir::func::FuncOp::create(
+        loc, spec.EntryPoint(), builder.getFunctionType(inputs, {type}));
+    function->setAttr("iree.reflection", builder.getDictionaryAttr({
+        builder.getNamedAttr(contracts::kPointwiseAbiKey, builder.getStringAttr(spec.AbiTag()))}));
+    module->push_back(function);
+    auto *block = function.addEntryBlock();
+    builder.setInsertionPointToStart(block);
+    mlir::Value result = block->getArgument(0);
+    if (spec.kind != contracts::PointwiseKind::Multiply) {
+        result = BuildSilu(builder, loc, result);
+    }
+    if (spec.kind != contracts::PointwiseKind::Silu) {
+        result = builder.create<mlir::stablehlo::MulOp>(loc, result, block->getArgument(1));
+    }
+    builder.create<mlir::func::ReturnOp>(loc, result);
+    if (mlir::failed(VerifyModule(*module))) {
+        return {};
+    }
+    return module;
+}
+
 mlir::OwningOpRef<mlir::ModuleOp> BuildFFN(
     mlir::MLIRContext &context, const contracts::FFNCompileSpec &spec) {
     RegisterDialects(context);

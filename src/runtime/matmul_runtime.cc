@@ -391,6 +391,12 @@ struct WeightState {
 struct ModuleState {
     std::shared_ptr<DeviceState> device;
     MatmulShape shape;
+    contracts::PointwiseSpec pointwise;
+    std::vector<BufferView> arguments;
+    std::size_t output_rows = 0, output_cols = 0;
+    void Initialize(const std::string &path, const std::string &entry,
+                    const char *abi_key, const std::string &abi, std::size_t arity);
+    std::vector<float> Invoke();
     // The bytecode module borrows these bytes. Context/module handles must
     // be destroyed before the vector; vector storage is never changed.
     std::vector<std::uint8_t> bytecode;
@@ -468,42 +474,52 @@ LoadedModule::LoadedModule(const DeviceContext &device, const std::string &vmfb_
     auto &owner = *state_->device;
     owner.RequireHealthy();
     state_->shape = shape;
+    state_->output_rows = shape.m;
+    state_->output_cols = shape.n;
+    state_->Initialize(vmfb_path, function, "coral.m1.abi", shape.AbiTag(), 2);
+}
+
+void detail::ModuleState::Initialize(const std::string &path, const std::string &entry,
+                                    const char *abi_key, const std::string &abi,
+                                    std::size_t arity) {
+    auto &owner = *device;
+    owner.RequireHealthy();
     const auto start = Clock::now();
-    state_->bytecode = ReadModule(vmfb_path);
+    bytecode = ReadModule(path);
     const auto allocator = iree_allocator_system();
     Check(iree_vm_bytecode_module_create(
               owner.instance.get(), IREE_VM_BYTECODE_MODULE_FLAG_NONE,
-              iree_make_const_byte_span(state_->bytecode.data(), state_->bytecode.size()),
-              iree_allocator_null(), allocator, state_->module.put()),
+              iree_make_const_byte_span(bytecode.data(), bytecode.size()),
+              iree_allocator_null(), allocator, module.put()),
           "load VMFB");
     Check(iree_vm_module_lookup_function_by_name(
-              state_->module.get(), IREE_VM_FUNCTION_LINKAGE_EXPORT,
-              iree_make_cstring_view(function.c_str()), &state_->function),
-          "find matmul export");
-    const auto abi =
-        ToString(iree_vm_function_lookup_attr_by_name(&state_->function, IREE_SV("coral.m1.abi")));
-    if (abi != shape.AbiTag()) {
-        throw std::runtime_error("VMFB M1 ABI mismatch: expected '" + shape.AbiTag() + "', got '" +
-                                 abi + "'; compile the matching M1 exporter output");
+              module.get(), IREE_VM_FUNCTION_LINKAGE_EXPORT,
+              iree_make_cstring_view(entry.c_str()), &function),
+          "find matmul export or pointwise export");
+    const auto actual_abi = ToString(iree_vm_function_lookup_attr_by_name(
+        &function, iree_make_cstring_view(abi_key)));
+    if (actual_abi != abi) {
+        throw std::runtime_error("VMFB ABI mismatch: expected '" + abi + "', got '" + actual_abi + "'");
     }
-    const auto signature = iree_vm_function_signature(&state_->function);
-    if (ToString(signature.calling_convention) != "0rr_r") {
-        throw std::runtime_error("expected synchronous tensor ABI: two buffer views, one result");
+    const auto signature = iree_vm_function_signature(&function);
+    const std::string expected = arity == 1 ? "0r_r" : "0rr_r";
+    if (ToString(signature.calling_convention) != expected) {
+        throw std::runtime_error("unexpected synchronous tensor calling convention");
     }
 
-    iree_vm_module_t *modules[] = {owner.hal_module.get(), state_->module.get()};
+    iree_vm_module_t *modules[] = {owner.hal_module.get(), module.get()};
     const auto status =
         iree_vm_context_create_with_modules(owner.instance.get(), IREE_VM_CONTEXT_FLAG_NONE, 2,
-                                            modules, allocator, state_->context.put());
+                                            modules, allocator, context.put());
     if (!iree_status_is_ok(status)) {
         owner.poisoned = true; // A module initializer may already have run.
         Check(status, "initialize VM context (host numerical kernels are disabled)");
     }
     Check(
-        iree_vm_list_create(iree_vm_make_undefined_type_def(), 2, allocator, state_->inputs.put()),
+        iree_vm_list_create(iree_vm_make_undefined_type_def(), arity, allocator, inputs.put()),
         "create input list");
     Check(
-        iree_vm_list_create(iree_vm_make_undefined_type_def(), 1, allocator, state_->outputs.put()),
+        iree_vm_list_create(iree_vm_make_undefined_type_def(), 1, allocator, outputs.put()),
         "create output list");
     ++owner.counters.module_loads;
     owner.counters.module_load_ms += ElapsedMs(start);
@@ -525,8 +541,6 @@ std::vector<float> LoadedModule::Run(TensorBinding activation, const PreparedWei
         weights.state_->cols != shape.k) {
         throw std::invalid_argument("weight belongs to another context or shape");
     }
-    // Allocate the unpublished host result before beginning device work.
-    std::vector<float> result(shape.OutputElements());
     ClearCallLists clear{state_->inputs.get(), state_->outputs.get()};
     iree_vm_list_clear(clear.inputs);
     iree_vm_list_clear(clear.outputs);
@@ -546,47 +560,110 @@ std::vector<float> LoadedModule::Run(TensorBinding activation, const PreparedWei
         PushBuffer(clear.inputs, state_->activation.get());
         PushBuffer(clear.inputs, weights.state_->view.get());
 
-        const auto before = owner.counters;
-        const auto start = Clock::now();
-        const auto status =
-            iree_vm_invoke(state_->context.get(), state_->function, IREE_VM_INVOCATION_FLAG_NONE,
-                           nullptr, clear.inputs, clear.outputs, iree_allocator_system());
-        owner.counters.invoke_ms += ElapsedMs(start);
-        Check(status, "invoke Coral matmul");
-        const auto dispatches = owner.counters.coral_dispatches - before.coral_dispatches;
-        const auto samples = owner.counters.dispatches_with_instruction_count -
-                             before.dispatches_with_instruction_count;
-        if (dispatches == 0 || samples != dispatches ||
-            owner.counters.kernel_instructions == before.kernel_instructions ||
-            owner.counters.observer_errors != before.observer_errors ||
-            owner.counters.failed_dispatches != before.failed_dispatches) {
-            throw std::runtime_error(
-                "invocation lacks complete, successful Coral kernel execution evidence");
-        }
-        if (iree_vm_list_size(clear.outputs) != 1) {
-            throw std::runtime_error("matmul must return exactly one tensor");
-        }
-        auto *output = iree_vm_list_get_buffer_view_assign(clear.outputs, 0);
-        if (!output || iree_hal_buffer_view_shape_rank(output) != 2 ||
-            iree_hal_buffer_view_shape_dim(output, 0) != static_cast<iree_hal_dim_t>(shape.m) ||
-            iree_hal_buffer_view_shape_dim(output, 1) != static_cast<iree_hal_dim_t>(shape.n) ||
-            iree_hal_buffer_view_element_type(output) != IREE_HAL_ELEMENT_TYPE_FLOAT_32 ||
-            iree_hal_buffer_view_encoding_type(output) != IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR ||
-            iree_hal_buffer_view_byte_length(output) != result.size() * sizeof(float)) {
-            throw std::runtime_error("output violates the F32 [M,N] tensor ABI");
-        }
-        // Both HAL devices use the shared host-visible heap in M1. This copy
-        // measures HAL -> caller traffic, not the simulator's internal staging.
-        Check(iree_hal_device_transfer_d2h(
-                  owner.host_device.get(), iree_hal_buffer_view_buffer(output), 0, result.data(),
-                  result.size() * sizeof(float), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
-                  iree_infinite_timeout()),
-              "read back output");
-        owner.counters.download_bytes += result.size() * sizeof(float);
-        ++owner.counters.calls_completed;
-        return result;
+        return state_->Invoke();
     } catch (...) {
         // No partial output is returned and no implicit CPU replay is attempted.
+        owner.poisoned = true;
+        throw;
+    }
+}
+
+std::vector<float> detail::ModuleState::Invoke() {
+    auto &owner = *device;
+    std::vector<float> result(ElementCount(output_rows, output_cols));
+    const auto before = owner.counters;
+    const auto start = Clock::now();
+    const auto status =
+        iree_vm_invoke(context.get(), function, IREE_VM_INVOCATION_FLAG_NONE,
+                       nullptr, inputs.get(), outputs.get(), iree_allocator_system());
+    owner.counters.invoke_ms += ElapsedMs(start);
+    Check(status, "invoke Coral program");
+    const auto dispatches = owner.counters.coral_dispatches - before.coral_dispatches;
+    const auto samples = owner.counters.dispatches_with_instruction_count -
+                         before.dispatches_with_instruction_count;
+    if (dispatches == 0 || samples != dispatches ||
+        owner.counters.kernel_instructions == before.kernel_instructions ||
+        owner.counters.observer_errors != before.observer_errors ||
+        owner.counters.failed_dispatches != before.failed_dispatches) {
+        throw std::runtime_error(
+            "invocation lacks complete, successful Coral kernel execution evidence");
+    }
+    if (iree_vm_list_size(outputs.get()) != 1) {
+        throw std::runtime_error("program must return exactly one tensor");
+    }
+    auto *output = iree_vm_list_get_buffer_view_assign(outputs.get(), 0);
+    if (!output || iree_hal_buffer_view_shape_rank(output) != 2 ||
+        iree_hal_buffer_view_shape_dim(output, 0) != static_cast<iree_hal_dim_t>(output_rows) ||
+        iree_hal_buffer_view_shape_dim(output, 1) != static_cast<iree_hal_dim_t>(output_cols) ||
+        iree_hal_buffer_view_element_type(output) != IREE_HAL_ELEMENT_TYPE_FLOAT_32 ||
+        iree_hal_buffer_view_encoding_type(output) != IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR ||
+        iree_hal_buffer_view_byte_length(output) != result.size() * sizeof(float)) {
+        throw std::runtime_error("output violates the F32 [M,N] tensor ABI");
+    }
+    // Both HAL devices use the shared host-visible heap in M1. This copy
+    // measures HAL -> caller traffic, not the simulator's internal staging.
+    Check(iree_hal_device_transfer_d2h(
+              owner.host_device.get(), iree_hal_buffer_view_buffer(output), 0, result.data(),
+              result.size() * sizeof(float), IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT,
+              iree_infinite_timeout()),
+          "read back output");
+    owner.counters.download_bytes += result.size() * sizeof(float);
+    ++owner.counters.calls_completed;
+    return result;
+}
+
+PointwiseModule::PointwiseModule(const DeviceContext &device, const std::string &path,
+                                 contracts::PointwiseSpec spec)
+    : state_(std::make_unique<detail::ModuleState>()) {
+    (void)spec.Elements();
+    state_->device = device.state_;
+    state_->pointwise = spec;
+    state_->output_rows = spec.rows;
+    state_->output_cols = spec.cols;
+    state_->Initialize(path, spec.EntryPoint(), contracts::kPointwiseAbiKey,
+                       spec.AbiTag(), spec.Arity());
+    state_->arguments.resize(spec.Arity());
+}
+PointwiseModule::~PointwiseModule() = default;
+PointwiseModule::PointwiseModule(PointwiseModule &&) noexcept = default;
+PointwiseModule &PointwiseModule::operator=(PointwiseModule &&) noexcept = default;
+
+std::vector<float> PointwiseModule::Run(const std::vector<TensorBinding> &bindings) {
+    if (!state_) {
+        throw std::invalid_argument("cannot use a moved-from pointwise module");
+    }
+    auto &owner = *state_->device;
+    owner.RequireHealthy();
+    const auto &spec = state_->pointwise;
+    if (bindings.size() != spec.Arity()) {
+        throw std::invalid_argument("wrong number of pointwise inputs");
+    }
+    for (const auto &binding : bindings) {
+        binding.Validate(spec.rows, spec.cols);
+    }
+    ClearCallLists clear{state_->inputs.get(), state_->outputs.get()};
+    iree_vm_list_clear(clear.inputs);
+    iree_vm_list_clear(clear.outputs);
+    ++owner.counters.calls_attempted;
+    try {
+        for (std::size_t i = 0; i < bindings.size(); ++i) {
+            const auto &binding = bindings[i];
+            auto &view = state_->arguments[i];
+            if (!view.get()) {
+                view = owner.Upload(binding);
+            } else {
+                Check(iree_hal_device_transfer_h2d(
+                          owner.host_device.get(), binding.data,
+                          iree_hal_buffer_view_buffer(view.get()), 0,
+                          binding.element_count * sizeof(float),
+                          IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()),
+                      "update pointwise input");
+                owner.counters.upload_bytes += binding.element_count * sizeof(float);
+            }
+            PushBuffer(clear.inputs, view.get());
+        }
+        return state_->Invoke();
+    } catch (...) {
         owner.poisoned = true;
         throw;
     }
