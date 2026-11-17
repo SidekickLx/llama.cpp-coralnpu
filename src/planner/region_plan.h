@@ -63,6 +63,8 @@ enum class RegionRejectionCode {
     InputsNotReady,
     InputLifetimeNotProven,
     StaleGraphOrSchedule,
+    MissingMemberCapability,
+    MissingUseInformation,
     MissingMemberArtifact,
     MissingRegionArtifact,
     UnsupportedTarget,
