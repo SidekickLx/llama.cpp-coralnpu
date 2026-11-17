@@ -28,3 +28,32 @@ cc_binary(
         "@llvm-project//mlir:Support",
     ],
 )
+
+cc_library(
+    name = "reference",
+    srcs = ["reference.cc"],
+    hdrs = ["reference.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":stablehlo_program",
+        "@stablehlo//:stablehlo_ops",
+        "@stablehlo//:reference_api",
+        "@stablehlo//:reference_configuration",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:FuncDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)
+
+cc_binary(
+    name = "coral-stablehlo-reference",
+    srcs = ["reference_tool.cc"],
+    deps = [
+        ":stablehlo_program",
+        ":reference",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
+    ],
+)

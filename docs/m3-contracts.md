@@ -1,6 +1,8 @@
 # M3: FFN interfaces and semantic contract
 
-Status: **step 1 design contract**, accepted architecture, version 1.
+Status: **accepted design contract**, version 1. Implementation progress and
+acceptance evidence: [graph export](m3-graph-export.md) and
+[StableHLO infrastructure](m3-stablehlo.md).
 The accompanying headers define metadata only. The graph exporter, importer,
 planner checks, reference runner, compiler integration, and FFN runtime are
 subsequent work. No M3 execution or acceptance result is claimed here.

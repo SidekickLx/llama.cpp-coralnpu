@@ -31,6 +31,8 @@ is reserved for SoC integration; completing M2 does not constitute that release.
   the graph, and performs short prefill and decode runs.
 - **Execution evidence:** per-node placement, successful Coral dispatches,
   simulator kernel instruction counts, and module/weight-cache statistics.
+- **M3 frontend foundations:** original DAG and actual split snapshots, official
+  StableHLO typed ops/verifier, and the upstream CPU reference interpreter.
 - **Numerical and failure tests:** fixed-token CPU/Coral comparison, adapter
   capability boundaries, mixed graphs, mutable weights, and error propagation.
 
@@ -40,9 +42,11 @@ operations still run on the CPU. FFN subgraph compilation, JIT, W8A8/W4A8,
 concurrent requests, and SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
 
-M3 step 1 defines the [FFN interfaces and semantic contract](docs/m3-contracts.md).
-The shared metadata headers are design contracts; FFN import, reference
-validation, region planning, and fused execution are not implemented yet.
+M3 steps 1–3 provide the [FFN contracts](docs/m3-contracts.md),
+[real GGML graph export](docs/m3-graph-export.md), and
+[typed StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md).
+Standalone matmul/FFN fixtures pass numerical tests. Importing real GGML regions,
+region planning, and fused execution remain future work.
 
 ## How it works
 
@@ -655,4 +659,4 @@ this repository does not relicense third-party materials.
 
 M3 development: [interface and semantic contract](docs/m3-contracts.md) and
 [real GGML graph export](docs/m3-graph-export.md), plus
-[StableHLO construction and verification](docs/m3-stablehlo.md).
+[StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md).

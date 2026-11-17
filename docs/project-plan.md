@@ -202,11 +202,11 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
 
 **实现顺序**
 
-1. **接口与语义契约（已定义，尚无执行实现）**：共享元数据头文件、FFN ABI、
+1. **接口与语义契约（已完成）**：共享元数据头文件、FFN ABI、
    数值策略、candidate/plan/executable 状态、编译/runtime 边界与失败语义。
-2. 导出固定模型真实 GGML DAG，记录稳定节点 ID、连接、参数、shape/stride、
+2. **真实图导出（已完成）**：导出固定模型真实 GGML DAG，记录稳定节点 ID、连接、参数、shape/stride、
    consumer 和 placement。图导出不携带本机地址。
-3. 接通固定版本 StableHLO builder、MLIR/StableHLO verifier 和参考解释器。
+3. **标准 IR 基础设施（已完成）**：接通固定版本 StableHLO builder、MLIR/StableHLO verifier 和参考解释器。
    小程序能执行，非法类型/shape 能拒绝；记录实际支持范围。
 4. 实现逐算子 GGML→StableHLO importer，验证 MUL_MAT、SILU、MUL 和
    split GLU 的参数、维度及数值；layout 变换只通过显式验收的规则接入。
@@ -216,6 +216,10 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
    完整落在同一 backend split。不能融合时，已接管成员仍可合法执行。
 7. 将完整真实/合成 FFN 转换成标准 StableHLO，运行 verifier 和 CPU reference，
    与 GGML CPU 对照；完成合法性、生命周期与拒绝用例，验收 M3。
+
+前三步的实现和验收证据见 [图导出](m3-graph-export.md) 与
+[StableHLO 基础设施](m3-stablehlo.md)。当前 FFN reference 使用独立数值 fixture，
+尚未完成真实 GGML region 的导入与对照，不能据此验收整个 M3。
 
 **融合合法性**
 

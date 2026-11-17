@@ -24,8 +24,11 @@ PY
 cd "$compiler_root"
 bazel build --config=dev --jobs="${M3_BUILD_JOBS:-4}" \
     --inject_repository="coral_project=$project_root" \
-    @coral_project//compiler/ir:coral-stablehlo-tool
+    @coral_project//compiler/ir:coral-stablehlo-tool \
+    @coral_project//compiler/ir:coral-stablehlo-reference
 binary="$compiler_root/bazel-bin/external/+local_repository+coral_project/compiler/ir/coral-stablehlo-tool"
 mkdir -p "$project_root/build/m3"
 ln -sfn "$binary" "$project_root/build/m3/coral-stablehlo-tool"
 printf 'StableHLO tool: %s\n' "$project_root/build/m3/coral-stablehlo-tool"
+reference_binary="$compiler_root/bazel-bin/external/+local_repository+coral_project/compiler/ir/coral-stablehlo-reference"
+ln -sfn "$reference_binary" "$project_root/build/m3/coral-stablehlo-reference"
