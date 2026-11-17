@@ -6,6 +6,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/Diagnostics.h"
+#include "stablehlo/dialect/StablehloOps.h"
 #include <limits>
 #include <map>
 
@@ -24,31 +25,67 @@ bool ValidId(uint64_t id) {
 llvm::StringRef SourceOp(const ggml_tensor &node) {
     switch (node.op) {
         case GGML_OP_MUL_MAT: return "MUL_MAT";
+        case GGML_OP_UNARY: return "UNARY";
+        case GGML_OP_MUL: return "MUL";
+        case GGML_OP_GLU: return "GLU";
         default: return "unsupported";
     }
 }
 
 LogicalResult ValidateNode(const ggml_tensor &node, Location loc, std::size_t count) {
-    if (node.op != GGML_OP_MUL_MAT) {
-        return Reject(loc, "operator", "only MUL_MAT is currently admitted");
+    std::size_t required = 2;
+    switch (node.op) {
+        case GGML_OP_MUL_MAT:
+        case GGML_OP_MUL:
+        case GGML_OP_GLU:
+            break;
+        case GGML_OP_UNARY:
+            required = 1;
+            break;
+        default:
+            return Reject(loc, "operator", "only MUL_MAT, SILU, MUL and split SWIGLU are admitted");
     }
-    if (count != 2 || !node.src[0] || !node.src[1]) {
-        return Reject(loc, "operands", "MUL_MAT requires two sources");
+    if (count != required) {
+        return Reject(loc, "operands", "wrong number of SSA operands");
     }
-    for (int slot = 2; slot < GGML_MAX_SRC; ++slot) {
-        if (node.src[slot]) {
-            return Reject(loc, "operands", "unexpected extra GGML source");
+    for (std::size_t slot = 0; slot < GGML_MAX_SRC; ++slot) {
+        if ((slot < required) != (node.src[slot] != nullptr)) {
+            return Reject(loc, "operands", "missing source or unexpected extra GGML source");
         }
     }
     for (std::size_t word = 0; word < GGML_MAX_OP_PARAMS / sizeof(int32_t); ++word) {
         const auto value = node.op_params[word];
-        if (value != 0 && !((word == 0 || word == 3) && value == GGML_PREC_F32)) {
-            return Reject(loc, "parameters", "MUL_MAT requires default/F32 precision and no hints");
+        if (node.op == GGML_OP_MUL_MAT && (word == 0 || word == 3)) {
+            if (value != GGML_PREC_UNDEFINED && value != GGML_PREC_F32) {
+                return Reject(loc, "parameters", "MUL_MAT requires default/F32 precision");
+            }
+        } else if (word == 0 && node.op == GGML_OP_UNARY) {
+            if (value != GGML_UNARY_OP_SILU) {
+                return Reject(loc, "parameters", "only UNARY(SILU) is admitted");
+            }
+        } else if (word == 0 && node.op == GGML_OP_GLU) {
+            if (value != GGML_GLU_OP_SWIGLU) {
+                return Reject(loc, "parameters", "only split GLU(SWIGLU) is admitted");
+            }
+        } else if (value != 0) {
+            return Reject(loc, "parameters", "unknown parameters, hints, swaps or clamps are unsupported");
         }
     }
-    if (node.src[0]->ne[0] != node.src[1]->ne[0] ||
-        node.ne[0] != node.src[0]->ne[1] || node.ne[1] != node.src[1]->ne[1]) {
-        return Reject(loc, "shape", "MUL_MAT source/output dimensions disagree");
+    if (node.op == GGML_OP_MUL_MAT) {
+        if (node.src[0]->ne[0] != node.src[1]->ne[0] ||
+            node.ne[0] != node.src[0]->ne[1] || node.ne[1] != node.src[1]->ne[1]) {
+            return Reject(loc, "shape", "MUL_MAT source/output dimensions disagree");
+        }
+    } else {
+        // GGML can repeat/broadcast operands. The initial dense FFN contract
+        // intentionally admits only exact shape equality at every operand.
+        for (std::size_t slot = 0; slot < required; ++slot) {
+            for (int axis = 0; axis < GGML_MAX_DIMS; ++axis) {
+                if (node.ne[axis] != node.src[slot]->ne[axis]) {
+                    return Reject(loc, "shape", "elementwise broadcasting or shape changes are unsupported");
+                }
+            }
+        }
     }
     return success();
 }
@@ -103,8 +140,28 @@ mlir::FailureOr<mlir::Value> ImportGGMLNode(
             return mlir::failure();
         }
     }
-    // Source order is weight,activation in GGML and activation,weight in HLO.
-    return BuildDenseDot(builder, loc, *result_type, operands[1], operands[0]);
+    switch (node.op) {
+        case GGML_OP_MUL_MAT:
+            // GGML's weight,activation order differs from StableHLO's dot order.
+            return BuildDenseDot(builder, loc, *result_type, operands[1], operands[0]);
+        case GGML_OP_UNARY:
+            return BuildSilu(builder, loc, operands[0]);
+        case GGML_OP_MUL: {
+            const mlir::Value result = builder.create<mlir::stablehlo::MulOp>(
+                loc, operands[0], operands[1]);
+            return result;
+        }
+        case GGML_OP_GLU: {
+            // The pinned split SwiGLU definition is SiLU(src[0]) * src[1].
+            // Equal dimensions do not make the gate/up roles interchangeable.
+            const auto gate = BuildSilu(builder, loc, operands[0]);
+            const mlir::Value result = builder.create<mlir::stablehlo::MulOp>(
+                loc, gate, operands[1]);
+            return result;
+        }
+        default:
+            return mlir::failure(); // ValidateNode has rejected this case.
+    }
 }
 
 mlir::OwningOpRef<mlir::ModuleOp> ImportGGMLFunction(

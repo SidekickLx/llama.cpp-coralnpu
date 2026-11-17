@@ -23,6 +23,21 @@ NEGATIVE = {
 for word in range(16):
     NEGATIVE[f"bad-param-{word}"] = "parameters"
 
+POSITIVE += ["silu-ranges", "mul-ranges", "glu-asymmetric", "glu-reversed",
+             "ffn-split", "ffn-expanded", "ffn-expanded-reversed"]
+NEGATIVE.update({
+    "bad-silu-activation": "parameters", "bad-silu-inplace": "layout",
+    "bad-silu-extra-source": "operands", "bad-glu-swap": "parameters",
+    "bad-glu-clamp": "parameters", "bad-glu-oai": "parameters",
+    "bad-glu-packed": "operands", "bad-glu-shape": "shape",
+    "bad-glu-missing-source": "operands", "bad-glu-dtype": "tensor-type",
+    "bad-mul-broadcast": "shape", "bad-mul-result-shape": "shape",
+    "bad-ffn-order": "dependency", "bad-ffn-self-cycle": "dependency",
+})
+for operator in ("silu", "mul", "glu"):
+    for word in range(16):
+        NEGATIVE[f"bad-{operator}-param-{word}"] = "parameters"
+
 
 def run(args, work):
     reports = []
@@ -58,6 +73,17 @@ def run(args, work):
             if any(item["failing_indices"] for item in report["comparisons"]):
                 raise RuntimeError(f"{name}: nonempty failing indices")
             reports.append(report)
+    # A reversed MUL preserves the expanded FFN, but reversing GLU gate/up
+    # changes the program. Check both so symmetric fixtures cannot hide a bug.
+    split = json.loads((work / "ffn-split/reference-output.json").read_text())["outputs"][-1]["values"]
+    for name in ("ffn-expanded", "ffn-expanded-reversed"):
+        expanded = json.loads((work / name / "reference-output.json").read_text())["outputs"][-1]["values"]
+        if split != expanded:
+            raise RuntimeError("split and expanded FFN differ")
+    normal = json.loads((work / "glu-asymmetric/reference-output.json").read_text())["outputs"][0]["values"]
+    reversed_glu = json.loads((work / "glu-reversed/reference-output.json").read_text())["outputs"][0]["values"]
+    if max(abs(a-b) for a, b in zip(normal, reversed_glu)) < 1:
+        raise RuntimeError("GLU fixture does not distinguish gate/up ordering")
     summary = {"status": "passed", "positive_cases": len(POSITIVE),
                "negative_cases": len(NEGATIVE), "cases": reports}
     (work / "report.json").write_text(json.dumps(summary, indent=2) + "\n")

@@ -64,6 +64,7 @@ cc_library(
     hdrs = ["ggml_importer.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "@stablehlo//:stablehlo_ops",
         ":stablehlo_program",
         "//:contracts",
         "//:ggml_headers",

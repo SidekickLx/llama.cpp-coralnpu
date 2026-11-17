@@ -83,4 +83,31 @@ input identity; dtype/layout/batching/shape errors, missing/extra sources,
 unresolved dependencies, invalid IDs, and every unknown parameter word.
 
 Evidence is retained at `build/m3-importer-results/import-rqdyakuh`.
-This milestone implements MUL_MAT; SILU, MUL and split SwiGLU follow separately.
+This first commit covered MUL_MAT; the following milestone adds the remaining
+operators.
+
+## Pointwise and split SwiGLU rules
+
+| GGML source | Standard StableHLO lowering | Additional admission |
+| --- | --- | --- |
+| UNARY(SILU) | negate, exponential, scalar-one broadcast, add, divide | One source; exact SILU enum; all remaining parameter words zero |
+| MUL | multiply | Two sources and output with identical shapes; all parameters zero |
+| GLU(SWIGLU) | SiLU(src[0]) multiplied by src[1] | Two split inputs; swap=0; all remaining parameter words zero |
+
+Inputs, results and SSA values must have the same validated static F32 shapes.
+Broadcasting, packed one-input GLU, alternate activations, clamped/OAI variants,
+swapped GLU parameters, in-place/view operations and unknown parameters are
+rejected. A MUL may put the SiLU result on either side; GLU gate/up order is
+semantically significant and never inferred from matching dimensions.
+
+The second milestone passed 12 numerical cases and 99 rejection cases at
+`build/m3-importer-results/import-nzyj3tx3`. SiLU covers negative and positive
+saturation (-80 to +80), near-zero values and zero. Asymmetric GLU fixtures
+distinguish reversed gate/up edges. Composed GGML FFNs exercise all three
+matmuls, split GLU, and SILU+MUL with both MUL operand orders; named intermediates
+and the final output are compared with actual GGML CPU execution.
+All parameter words are tested for every admitted operator. Reordered and
+self-referential dependencies are rejected.
+
+These composed test graphs are explicitly selected fixtures. They do not
+constitute an automatic FFN matcher, fusion plan, or Coral execution path.
