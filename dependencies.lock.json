@@ -94,13 +94,5 @@
     "MPACT-Sim and MPACT-RISC-V follow the compiler MODULE.bazel overrides.",
     "The separate coralnpu-mpact checkout is a source reference, not a replacement for compiler-managed dependencies.",
     "Upstream source and model assets retain their respective upstream licenses."
-  ],
-  "project_patches": {
-    "llama.cpp": [
-      {
-        "path": "patches/llama.cpp/0001-scheduler-graph-observer.patch",
-        "sha256": "d0b3aaf772830bee59d85caf659ceb33fdfe76468dd91babd81c9123ecfeba8e"
-      }
-    ]
-  }
+  ]
 }

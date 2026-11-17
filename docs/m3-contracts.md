@@ -1,11 +1,10 @@
 # M3: FFN interfaces and semantic contract
 
 Status: **accepted design contract**, version 1. Implementation progress and
-acceptance evidence: [graph export](m3-graph-export.md) and
-[StableHLO infrastructure](m3-stablehlo.md).
-The accompanying headers define metadata only. The graph exporter, importer,
-planner checks, reference runner, compiler integration, and FFN runtime are
-subsequent work. No M3 execution or acceptance result is claimed here.
+acceptance evidence: [upstream graph integration](m3-graph-export.md),
+[StableHLO infrastructure](m3-stablehlo.md) and [importer](m3-importer.md).
+The metadata headers do not authorize execution. Full FFN device execution
+and the complete M3 acceptance gate remain separate milestones.
 
 This document defines the M3/M4 boundary and supersedes the earlier proposal
 for a private computational IR followed by a separate StableHLO exporter.
@@ -256,7 +255,9 @@ Before creating a plan, prove:
 2. Every external input is ready before the first member. Every member is
    pure, and no KV or other externally visible state is modified.
 3. Non-output intermediates have no external consumers or graph-output flags.
-   Use the original graph's use/alias information, not only a truncated split.
+   Use parent-graph use counts retained by the upstream graph view, together
+   with explicit alias checks. Do not recompute global uses from split nodes.
+   An original-graph JSON export is not required.
    Every external use must go through the declared Y result.
 4. Member views, in-place updates, partial input overlap, output/input overlap,
    and other unproven aliases are rejected. Repeated references to the same

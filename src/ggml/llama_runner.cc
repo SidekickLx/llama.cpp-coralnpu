@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #include "ggml_coral.h"
-#include "graph_export.h"
 #include "support/json.h"
 #include "llama.h"
 #include <algorithm>
@@ -36,7 +35,6 @@ struct Arguments {
     fs::path tokens;
     std::string prompt = "Once upon a time";
     int decode = 3;
-    bool export_graph = false;
 };
 
 void Usage() {
@@ -44,7 +42,6 @@ void Usage() {
         << "coral-llama-runner --mode cpu|coral --model FILE --output NEW_DIRECTORY\n"
         << "  [--prompt TEXT --decode 2|3|4] | [--tokens FILE]\n"
         << "  --artifacts DIRECTORY   Required only in Coral mode (AOT profiles.tsv + VMFBs).\n"
-        << "  --export-graph          Export original DAG and actual scheduler splits.\n"
         << "A replay file supplies both prompt and decode input tokens. No compiler is invoked.\n";
 }
 
@@ -55,10 +52,6 @@ Arguments Parse(int argc, char **argv) {
         const std::string key = argv[i];
         if (!seen.insert(key).second) {
             throw std::invalid_argument("duplicate option: " + key);
-        }
-        if (key == "--export-graph") {
-            args.export_graph = true;
-            continue;
         }
         if (i + 1 >= argc) {
             throw std::invalid_argument("duplicate option or missing option value: " + key);
@@ -492,12 +485,6 @@ void Run(const Arguments &args) {
         throw std::runtime_error("failed to create llama context: " + adapter::LastError());
     }
 
-    std::unique_ptr<adapter::GraphExporter> graph_export;
-    if (args.export_graph) {
-        graph_export = std::make_unique<adapter::GraphExporter>(args.output);
-        graph_export->Attach(context.get());
-    }
-
     Batch batch;
     int position = 0;
     llama_token next = 0;
@@ -512,9 +499,6 @@ void Run(const Arguments &args) {
             inputs.push_back(tokens.values[tokens.prefill + step - 1]);
         }
         trace.Begin(step);
-        if (graph_export) {
-            graph_export->Begin(step);
-        }
         batch.Set(inputs, position);
         const auto before = adapter::GetStats();
         const auto start = std::chrono::steady_clock::now();
@@ -523,9 +507,6 @@ void Run(const Arguments &args) {
         if (status != 0) {
             throw std::runtime_error("llama_decode failed (" + std::to_string(status) +
                                      "): " + adapter::LastError());
-        }
-        if (graph_export) {
-            graph_export->Finish();
         }
         const auto after = adapter::GetStats();
         if (coral && (!trace.coral_nodes ||
@@ -568,7 +549,6 @@ void Run(const Arguments &args) {
             << ",\"logits_format\":\"little-endian-f32-row-major\""
             << ",\"input_mode\":" << JsonString(replay ? "fixed-token-replay" : "greedy")
             << ",\"model_file\":" << JsonString(args.model.filename().string())
-            << ",\"graph_exports\":" << (args.export_graph ? tokens.decode + 1 : 0)
             << ",\"observed_profiles\":" << trace.profiles.size()
             << ",\"observed_buffer_handles\":" << trace.buffers.size() << ",\"stats\":";
     WriteStats(summary, adapter::GetStats());

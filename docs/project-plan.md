@@ -204,8 +204,9 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
 
 1. **接口与语义契约（已完成）**：共享元数据头文件、FFN ABI、
    数值策略、candidate/plan/executable 状态、编译/runtime 边界与失败语义。
-2. **真实图导出（已完成）**：导出固定模型真实 GGML DAG，记录稳定节点 ID、连接、参数、shape/stride、
-   consumer 和 placement。图导出不携带本机地址。
+2. **真实图接入**：早期完整图导出已验证，现已移除其 scheduler 补丁与 observer。
+   后续使用上游 graph_optimize 的 split、全图使用计数和分配依赖；
+   cb_eval 与后端 dispatch trace 提供数值及实际执行证据。
 3. **标准 IR 基础设施（已完成）**：接通固定版本 StableHLO builder、MLIR/StableHLO verifier 和参考解释器。
    小程序能执行，非法类型/shape 能拒绝；记录实际支持范围。
 4. **逐算子 importer（已完成）**：直接从 GGML 元数据构造标准 StableHLO，
@@ -219,7 +220,7 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
 7. 将完整真实/合成 FFN 转换成标准 StableHLO，运行 verifier 和 CPU reference，
    与 GGML CPU 对照；完成合法性、生命周期与拒绝用例，验收 M3。
 
-前四步的实现和验收证据见 [图导出](m3-graph-export.md)、
+前四步的实现和验收证据见 [上游图接口](m3-graph-export.md)、
 [StableHLO 基础设施](m3-stablehlo.md) 与 [逐算子 importer](m3-importer.md)。
 当前已对照真实 GGML 算子和显式选择的合成 FFN，尚未完成真实 FFN 的自动识别、
 合法性与 placement 验证，不能据此验收整个 M3。
@@ -241,7 +242,7 @@ gate/up 绑定正确；真实 placement 和成员执行已验证；非法 region
 不会漏算节点、覆盖外部需要的中间值或提前复用输入内存。完整 FFN VMFB 的执行、
 三方对照与产物重载属于 M4。
 
-**交付**：共享契约、图导出器、FFN matcher/planner、GGML→StableHLO importer、
+**交付**：共享契约、上游图接口接入、FFN matcher/planner、GGML→StableHLO importer、
 标准 verifier/reference 接入、来源映射和合法性用例。
 [FFN 建图](https://github.com/ggml-org/llama.cpp/blob/9fba51d2c9a1b5cb5f0c47986c031334e2d7663a/src/llama-graph.cpp)
 

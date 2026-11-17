@@ -31,7 +31,7 @@ is reserved for SoC integration; completing M2 does not constitute that release.
   the graph, and performs short prefill and decode runs.
 - **Execution evidence:** per-node placement, successful Coral dispatches,
   simulator kernel instruction counts, and module/weight-cache statistics.
-- **M3 frontend foundations:** original DAG and actual split snapshots, direct
+- **M3 frontend foundations:** direct
   GGML-to-StableHLO import for static F32 matmul, SiLU, multiply and split SwiGLU,
   official typed ops/verifier, and the upstream CPU reference interpreter.
 - **Numerical and failure tests:** fixed-token CPU/Coral comparison, adapter
@@ -44,7 +44,7 @@ concurrent requests, and SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
 
 M3 steps 1–4 provide the [FFN contracts](docs/m3-contracts.md),
-[real GGML graph export](docs/m3-graph-export.md),
+[upstream graph integration](docs/m3-graph-export.md),
 [typed StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
 and the [per-operation GGML importer](docs/m3-importer.md).
 Numerical tests cover composed GGML FFN fixtures and captured real-model matmul
@@ -285,12 +285,7 @@ Patched submodules appearing modified is expected. See the
 [pinned upstream instructions](https://github.com/google-coral/coralnpu-compiler/blob/770dc9332dffed8ff91d8cface7e9d176227d912/README.md)
 for dependency details.
 
-Apply this project's hash-checked scheduler observation patch after fetching
-the pinned checkouts. This command is safe to repeat and never resets local changes.
-
-~~~bash
-python scripts/apply_dependency_patches.py
-~~~
+The pinned llama.cpp checkout is used without project patches.
 
 ### 5. Build the compiler, simulator, and runners
 
@@ -661,6 +656,6 @@ downloaded upstream projects and models retain their respective licenses;
 this repository does not relicense third-party materials.
 
 M3 development: [interface and semantic contract](docs/m3-contracts.md) and
-[real GGML graph export](docs/m3-graph-export.md), plus
+[upstream graph integration](docs/m3-graph-export.md), plus
 [StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
 and [GGML importer interfaces and tests](docs/m3-importer.md).
