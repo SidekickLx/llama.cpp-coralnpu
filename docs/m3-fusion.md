@@ -74,8 +74,8 @@ device-local transfer boundaries are not covered by that fixture.
 
 The out-of-tree Coral backend now installs its upstream `graph_optimize`
 callback and invokes the planner on each received split. Its capability query
-uses the same structural matmul admission and in-memory artifact catalog as
-`supports_op`. It performs no compilation or device work.
+uses the same structural matmul/pointwise admission and in-memory artifact
+catalogs as `supports_op`. It performs no compilation or device work.
 
 `Options::evaluation_callbacks` defaults to true because the application owns
 the scheduler callbacks. The diagnostic runner keeps that conservative policy.
@@ -83,9 +83,10 @@ Counters report optimization calls, candidates, preparation plans and
 rejections. Optimization can also occur during reservation, so these counters
 must not be interpreted as per-token executed FFN counts.
 
-The current backend still supports only eligible matmuls. No full FFN program
-is prepared or executed, and no member is skipped. Complete member execution
-and real same-split FFN placement remain M3 step 6; full FFN VMFB invocation
+M3 step 6 now admits and executes eligible standalone SiLU, multiply and split
+SwiGLU as well as matmul. Real-model FFN members share complete Coral compute
+ranges; see [execution evidence](m3-pointwise.md). No full FFN program is
+prepared or executed, and no member is skipped. Full FFN VMFB invocation
 remains M4.
 
 See [unpatched acceptance](m3-unpatched-test-report.md) for the final build,

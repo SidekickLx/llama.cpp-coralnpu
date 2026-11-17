@@ -21,8 +21,9 @@ is reserved for SoC integration; completing M2 does not constitute that release.
 ## Features
 
 - **GGML integration:** an out-of-tree Coral backend for supported, contiguous
-  two-dimensional F32 `MUL_MAT` operations. The scheduler keeps unsupported
-  operations on the CPU.
+  two-dimensional F32 matmul, SiLU, equal-shape multiply and split SwiGLU.
+  Each operation requires a matching AOT artifact. The scheduler keeps
+  unsupported operations on the CPU.
 - **Ahead-of-time compilation:** static shapes are exported to StableHLO and
   compiled to IREE VM bytecode modules (`.vmfb`). Weights remain runtime inputs.
 - **Persistent C++ runtime:** VM/device lifetime management, tensor ABI checks,
@@ -50,8 +51,11 @@ the [per-operation GGML importer](docs/m3-importer.md), and
 [FFN recognition and legality checks](docs/m3-fusion.md).
 Numerical tests cover composed GGML FFN fixtures and captured real-model matmul
 and split SwiGLU nodes during prefill/decode. Fusion checks use upstream graph,
-use-count and allocation interfaces with no llama.cpp patch. Complete FFN
-member support, real same-split placement and fused execution remain future work.
+use-count and allocation interfaces with no llama.cpp patch.
+[Standalone member execution and real FFN placement](docs/m3-pointwise.md)
+are verified: the complete FFN members can share a Coral compute range.
+They still execute as separate programs. Full real-region import acceptance
+remains M3 work; invoking a fused FFN VMFB belongs to M4.
 
 ## How it works
 
@@ -62,7 +66,7 @@ Preparation:
 Inference:
   GGUF -> llama.cpp -> GGML scheduler
                         |-- unsupported operations -> CPU
-                        +-- supported F32 matmul -> Coral adapter
+                        +-- supported F32 members -> Coral adapter
                                                  -> IREE VM / HAL
                                                  -> MPACT CoralNPU simulation
 ~~~
@@ -70,7 +74,9 @@ Inference:
 GGUF contains model metadata and tensors. It is not translated wholesale into
 StableHLO here. The exporter emits one matmul program per static shape, with
 the contract `Y[M,N] = X[M,K] × transpose(W[N,K])`. The compiler runs during
-preparation; inference only loads existing VMFBs.
+preparation; inference only loads existing VMFBs. The Quick start below retains
+the matmul-only M2 path. The [M3 member guide](docs/m3-pointwise.md) adds
+the separate `pointwise.tsv` catalog and same-split validation.
 
 A missing shape is ineligible for Coral and stays on the CPU. Once an operation
 is accepted for Coral execution, an invalid artifact or runtime failure is

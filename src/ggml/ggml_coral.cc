@@ -22,11 +22,13 @@ using runtime::PreparedWeight;
 using runtime::RuntimeStats;
 using runtime::TensorBinding;
 using ShapeKey = std::tuple<std::size_t, std::size_t, std::size_t>;
+using PointwiseKey = std::tuple<contracts::PointwiseKind, std::size_t, std::size_t>;
 using WeightKey = std::tuple<std::uintptr_t, std::uintptr_t, std::size_t, std::size_t>;
 
 struct Registration {
     Options options;
     std::map<ShapeKey, std::string> artifacts;
+    std::map<PointwiseKey, std::string> pointwise_artifacts;
     Stats stats;
     std::string error;
     bool registered = false;
@@ -34,6 +36,8 @@ struct Registration {
     ggml_backend_device device{};
 };
 Registration registration;
+
+PointwiseKey Key(contracts::PointwiseSpec spec) { return {spec.kind, spec.rows, spec.cols}; }
 
 ShapeKey Key(MatmulShape shape) { return {shape.m, shape.k, shape.n}; }
 
@@ -99,10 +103,53 @@ struct BackendContext {
     DeviceContext device;
     std::map<ShapeKey, std::unique_ptr<LoadedModule>> modules;
     std::map<WeightKey, std::unique_ptr<PreparedWeight>> weights;
+    std::map<PointwiseKey, std::unique_ptr<runtime::PointwiseModule>> pointwise_modules;
     bool failed = false;
     std::uint64_t optimization_generation = 0;
 
+    void ComputePointwise(ggml_tensor *node, contracts::PointwiseSpec spec) {
+        if (!HostStorage(node)) {
+            throw std::runtime_error("pointwise output must have host-visible storage");
+        }
+        std::vector<TensorBinding> bindings;
+        for (std::size_t i = 0; i < spec.Arity(); ++i) {
+            const auto *source = node->src[i];
+            if (!HostStorage(source)) {
+                throw std::runtime_error("pointwise input must have host-visible storage");
+            }
+            bindings.push_back({static_cast<const float *>(source->data), spec.Elements(),
+                                spec.rows, spec.cols, source->nb[1]});
+        }
+        const auto key = Key(spec);
+        const auto artifact = registration.pointwise_artifacts.find(key);
+        if (artifact == registration.pointwise_artifacts.end()) {
+            throw std::runtime_error("missing pointwise artifact");
+        }
+        auto module = pointwise_modules.find(key);
+        if (module == pointwise_modules.end()) {
+            auto loaded = std::make_unique<runtime::PointwiseModule>(device, artifact->second, spec);
+            module = pointwise_modules.emplace(key, std::move(loaded)).first;
+        }
+        const auto before = device.stats();
+        const auto output = module->second->Run(bindings);
+        std::memcpy(node->data, output.data(), output.size() * sizeof(float));
+        ++registration.stats.pointwise_calls;
+        if (registration.options.trace) {
+            const auto after = device.stats();
+            const NodeEvent event{node, {0, 0, 0},
+                after.coral_dispatches - before.coral_dispatches,
+                after.kernel_instructions - before.kernel_instructions, false,
+                registration.stats.graph_calls};
+            registration.options.trace(event, registration.options.trace_user_data);
+        }
+    }
+
     void Compute(ggml_tensor *node) {
+        contracts::PointwiseSpec pointwise;
+        if (CompatiblePointwise(node, &pointwise)) {
+            ComputePointwise(node, pointwise);
+            return;
+        }
         MatmulShape shape;
         if (!Compatible(node, &shape) || !HostStorage(node) ||
             !HostStorage(node->src[0]) || !HostStorage(node->src[1])) {
@@ -164,7 +211,7 @@ struct BackendContext {
             const NodeEvent event{node, shape,
                                   after.coral_dispatches - before.coral_dispatches,
                                   after.kernel_instructions - before.kernel_instructions,
-                                  cache_hit};
+                                  cache_hit, registration.stats.graph_calls};
             registration.options.trace(event, registration.options.trace_user_data);
         }
     }
@@ -176,6 +223,8 @@ void FreeBackend(ggml_backend_t backend) {
     delete static_cast<BackendContext *>(backend->context);
     delete backend;
 }
+
+planner::MemberSupport QueryFFNMember(const ggml_tensor *node, void *);
 
 ggml_status GraphCompute(ggml_backend_t backend, ggml_cgraph *graph) {
     auto &context = *static_cast<BackendContext *>(backend->context);
@@ -191,8 +240,7 @@ ggml_status GraphCompute(ggml_backend_t backend, ggml_cgraph *graph) {
             if (!(node->flags & GGML_TENSOR_FLAG_COMPUTE) || NoCompute(node->op)) {
                 continue;
             }
-            MatmulShape shape;
-            if (!Compatible(node, &shape) || !registration.artifacts.count(Key(shape))) {
+            if (QueryFFNMember(node, nullptr) != planner::MemberSupport::Supported) {
                 throw std::runtime_error("Coral graph contains an unsupported operation");
             }
         }
@@ -216,11 +264,16 @@ ggml_status GraphCompute(ggml_backend_t backend, ggml_cgraph *graph) {
 
 planner::MemberSupport QueryFFNMember(const ggml_tensor *node, void *) {
     MatmulShape shape;
-    if (!Compatible(node, &shape)) {
-        return planner::MemberSupport::Unsupported;
+    if (Compatible(node, &shape)) {
+        return registration.artifacts.count(Key(shape))
+            ? planner::MemberSupport::Supported : planner::MemberSupport::MissingArtifact;
     }
-    return registration.artifacts.count(Key(shape))
-        ? planner::MemberSupport::Supported : planner::MemberSupport::MissingArtifact;
+    contracts::PointwiseSpec pointwise;
+    if (CompatiblePointwise(node, &pointwise)) {
+        return registration.pointwise_artifacts.count(Key(pointwise))
+            ? planner::MemberSupport::Supported : planner::MemberSupport::MissingArtifact;
+    }
+    return planner::MemberSupport::Unsupported;
 }
 
 void GraphOptimize(ggml_backend_t backend, ggml_cgraph *graph,
@@ -244,6 +297,10 @@ void GraphOptimize(ggml_backend_t backend, ggml_cgraph *graph,
                 ++registration.stats.ffn_rejections;
             } else {
                 ++registration.stats.ffn_preparation_plans;
+                if (registration.options.plan_trace) {
+                    registration.options.plan_trace(std::get<planner::GGMLFFNPlan>(result),
+                                                    registration.options.trace_user_data);
+                }
             }
         }
         // Admission only. The current backend has no full-FFN executable.
@@ -314,8 +371,7 @@ bool SupportsBuffer(ggml_backend_dev_t, ggml_backend_buffer_type_t type) {
 }
 
 bool SupportsOp(ggml_backend_dev_t, const ggml_tensor *node) {
-    MatmulShape shape;
-    return Compatible(node, &shape) && registration.artifacts.count(Key(shape)) != 0;
+    return QueryFFNMember(node, nullptr) == planner::MemberSupport::Supported;
 }
 
 const char *RegName(ggml_backend_reg_t) { return "CORAL"; }
@@ -360,6 +416,55 @@ std::map<ShapeKey, std::string> ReadArtifacts(const std::string &directory) {
     }
     return result;
 }
+
+std::map<PointwiseKey, std::string> ReadPointwiseArtifacts(const std::string &directory) {
+    const auto root = std::filesystem::canonical(directory);
+    std::map<PointwiseKey, std::string> result;
+    if (!std::filesystem::exists(root / "pointwise.tsv")) {
+        return result; // A legacy M2 catalog grants matmul support only.
+    }
+    std::ifstream input(root / "pointwise.tsv");
+    std::string line;
+    if (!std::getline(input, line) || line != "coral-m3-pointwise-v1") {
+        throw std::runtime_error("invalid pointwise catalog header");
+    }
+    while (std::getline(input, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        contracts::PointwiseSpec spec;
+        std::string kind, filename, extra;
+        std::istringstream fields(line);
+        if (!(fields >> kind >> spec.rows >> spec.cols >> filename) || fields >> extra) {
+            throw std::runtime_error("invalid pointwise catalog row");
+        }
+        if (kind == "silu") {
+            spec.kind = contracts::PointwiseKind::Silu;
+        } else if (kind == "multiply") {
+            spec.kind = contracts::PointwiseKind::Multiply;
+        } else if (kind == "swiglu") {
+            spec.kind = contracts::PointwiseKind::SwiGLU;
+        } else {
+            throw std::runtime_error("unknown pointwise catalog operation");
+        }
+        (void)spec.Elements();
+        const std::filesystem::path path(filename);
+        if (path.filename() != path || path.extension() != ".vmfb") {
+            throw std::runtime_error("pointwise profile must name a local VMFB");
+        }
+        const auto resolved = std::filesystem::canonical(root / path);
+        if (resolved.parent_path() != root || !std::filesystem::is_regular_file(resolved)) {
+            throw std::runtime_error("pointwise artifact must be a regular file in its directory");
+        }
+        if (!result.emplace(Key(spec), resolved.string()).second) {
+            throw std::runtime_error("duplicate pointwise profile");
+        }
+    }
+    if (result.empty() || !input.eof()) {
+        throw std::runtime_error("empty or unreadable pointwise catalog");
+    }
+    return result;
+}
 } // namespace
 
 bool Compatible(const ggml_tensor *op, MatmulShape *shape) noexcept {
@@ -386,13 +491,62 @@ bool Compatible(const ggml_tensor *op, MatmulShape *shape) noexcept {
     return true;
 }
 
+bool CompatiblePointwise(const ggml_tensor *op, contracts::PointwiseSpec *spec) noexcept {
+    if (!op) {
+        return false;
+    }
+    contracts::PointwiseKind kind;
+    std::size_t arity = 0;
+    std::int32_t parameter = 0;
+    if (op->op == GGML_OP_UNARY) {
+        kind = contracts::PointwiseKind::Silu;
+        arity = 1;
+        parameter = GGML_UNARY_OP_SILU;
+    } else if (op->op == GGML_OP_MUL) {
+        kind = contracts::PointwiseKind::Multiply;
+        arity = 2;
+    } else if (op->op == GGML_OP_GLU) {
+        kind = contracts::PointwiseKind::SwiGLU;
+        arity = 2;
+        parameter = GGML_GLU_OP_SWIGLU;
+    } else {
+        return false;
+    }
+    for (std::size_t word = 0; word < GGML_MAX_OP_PARAMS / sizeof(std::int32_t); ++word) {
+        if (op->op_params[word] != (word == 0 ? parameter : 0)) {
+            return false;
+        }
+    }
+    for (std::size_t slot = arity; slot < GGML_MAX_SRC; ++slot) {
+        if (op->src[slot]) {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i <= arity; ++i) {
+        const auto *tensor = i == arity ? op : op->src[i];
+        if (!DenseMatrix(tensor) || tensor->view_src || tensor->view_offs ||
+            tensor->ne[0] != op->ne[0] || tensor->ne[1] != op->ne[1] ||
+            tensor->nb[0] != sizeof(float) ||
+            tensor->nb[1] != static_cast<std::size_t>(tensor->ne[0]) * sizeof(float) ||
+            tensor->nb[2] != tensor->nb[1] * tensor->ne[1] || tensor->nb[3] != tensor->nb[2]) {
+            return false;
+        }
+    }
+    if (spec) {
+        *spec = {kind, static_cast<std::size_t>(op->ne[1]), static_cast<std::size_t>(op->ne[0])};
+    }
+    return true;
+}
+
 void Register(const Options &options) {
     if (registration.registered) {
         throw std::logic_error("register Coral only once per process");
     }
     auto artifacts = ReadArtifacts(options.artifact_directory);
+    auto pointwise = ReadPointwiseArtifacts(options.artifact_directory);
     registration.options = options;
     registration.artifacts = std::move(artifacts);
+    registration.pointwise_artifacts = std::move(pointwise);
     auto &device = registration.device;
     device.reg = &registration.reg;
     device.iface.get_name = DeviceName;

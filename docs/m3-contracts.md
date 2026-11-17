@@ -392,7 +392,7 @@ preparation policy; it must preserve these error and ownership boundaries.
 | 3 | StableHLO builder/verifier/reference integration | Valid small modules evaluate; malformed modules fail; pinned coverage recorded |
 | 4 | Per-op GGML importer | Each supported mapping agrees with GGML CPU and preserves parameters |
 | 5 | Candidate matcher and legality checks (initial implementation complete) | Both spellings, capability and live guards checked through unmodified upstream interfaces; see [tests](m3-fusion.md) |
-| 6 | Standalone member support and placement | Every assigned member executes legally; real FFN can occupy one split |
+| 6 (complete) | [Standalone member support and placement](m3-pointwise.md) | Every assigned member executes legally; real FFN can occupy one split |
 | 7 | Full-region import and M3 acceptance | Real/synthetic FFN reference agreement and complete negative/lifetime cases |
 | M4 | AOT FFN artifact, independent runner, then GGML execution | Three-way numerical agreement, artifact compatibility and real device evidence |
 | M5 | Shared AOT/JIT service, cache and optimization passes | Invalidation, before/after IR and numerical/structural evidence |

@@ -66,8 +66,13 @@ def read_run(directory, mode):
         coral = [node for node in nodes if node["placement"] == "CORAL"]
         cpu = [node for node in nodes if node["placement"] == "CPU"]
         require(len(nodes) == len(cpu) + len(coral), "unknown placement")
-        require(len(coral) == step["coral_nodes"] and len(cpu) == step["cpu_nodes"], "node trace mismatch")
-        require(len(cpu) > 0, "expected unsupported operations to execute on CPU")
+        require(len(coral) == step["coral_nodes"], "Coral node trace mismatch")
+        if summary.get("observation", "nodes") == "nodes":
+            require(len(cpu) == step["cpu_nodes"] and len(cpu) > 0,
+                    "missing CPU observations")
+        else:
+            require(not cpu and step["cpu_nodes"] is None and step["cpu_matmuls"] is None,
+                    "backend observation must not invent CPU counts")
         for node in nodes:
             for field in ("src0", "src1", "output"):
                 tensor = node[field]
@@ -81,7 +86,10 @@ def read_run(directory, mode):
         if mode == "coral":
             require(len(coral) > 0 and stats["kernel_instructions"] > 0, "no actual NPU execution")
             require(stats["instruction_samples"] == stats["coral_dispatches"], "missing instruction samples")
-            require(stats["matmuls"] == len(coral) == stats["calls_completed"], "incomplete matmuls")
+            matmuls = sum(node["op"] == "MUL_MAT" for node in coral)
+            require(stats["matmuls"] == matmuls, "matmul trace mismatch")
+            require(stats.get("pointwise_calls", 0) == len(coral) - matmuls, "member trace mismatch")
+            require(len(coral) == stats["calls_completed"], "incomplete Coral calls")
             if index >= 2:
                 require(stats["module_loads"] == 0, "warm decode reloaded a module")
                 require(stats["weight_cache_hits"] > 0, "warm decode did not reuse model weights")

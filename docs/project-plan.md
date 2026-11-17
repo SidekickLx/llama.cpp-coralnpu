@@ -217,15 +217,17 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
    以及 SILU+MUL 展开式。通过未修改的上游 graph_optimize、全图使用计数和
    add_alloc_dep 验证边界；33 个用例覆盖跨 split、view、callback、复用和存活期。
    已接入 Coral 后端进行准入检查，不跳过节点或执行融合 FFN。
-6. 补齐受支持成员的独立 artifact/runtime 能力与 placement，确认真实 FFN
-   完整落在同一 backend split。不能融合时，已接管成员仍可合法执行。
+6. **Standalone member support and placement (complete)**: SiLU, multiply and
+   split SwiGLU execute through strict Coral VMFBs. Twenty real-model FFN member
+   groups share complete backend compute ranges; callback/missing-artifact
+   cases preserve legal individual execution. See [evidence](m3-pointwise.md).
 7. 将完整真实/合成 FFN 转换成标准 StableHLO，运行 verifier 和 CPU reference，
    与 GGML CPU 对照；完成合法性、生命周期与拒绝用例，验收 M3。
 
 当前实现和验收证据见 [上游图接口](m3-graph-export.md)、
 [StableHLO 基础设施](m3-stablehlo.md) 与 [逐算子 importer](m3-importer.md)、[融合检查](m3-fusion.md)。
-当前已完成算子对照和无补丁 planner 检查；真实 FFN 完整成员能力、
-同一 split placement 和完整区域验收仍待第 6、7 步，不能据此验收整个 M3。
+Step 6 is complete on unmodified llama.cpp. Full-region reference acceptance
+remains step 7; M3 as a whole is not yet accepted. Fused device execution is M4.
 
 **融合合法性**
 

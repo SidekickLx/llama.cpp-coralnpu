@@ -37,6 +37,11 @@ target_compile_options(coral-llama-runner PRIVATE -Wall -Wextra -fexceptions)
 set_target_properties(coral-llama-runner PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 if(BUILD_TESTING)
+    add_executable(coral-member-adapter-test "${PROJECT_SOURCE_DIR}/tests/ggml/member_adapter_test.cc")
+    target_link_libraries(coral-member-adapter-test PRIVATE ggml-coral)
+    target_compile_options(coral-member-adapter-test PRIVATE -Wall -Wextra -fexceptions)
+    set_target_properties(coral-member-adapter-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
     add_executable(coral-pointwise-test "${PROJECT_SOURCE_DIR}/tests/ggml/pointwise_test.cc")
     target_link_libraries(coral-pointwise-test PRIVATE ggml coral_m1_runtime)
     target_compile_options(coral-pointwise-test PRIVATE -Wall -Wextra -fexceptions)
