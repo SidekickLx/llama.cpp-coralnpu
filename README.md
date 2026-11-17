@@ -16,7 +16,7 @@ is reserved for SoC integration; completing M2 does not constitute that release.
 
 [Quick start](#quick-start) · [Tests](#tests) ·
 [Repository layout](#repository-layout) · [Development](#development) ·
-[Project plan](docs/project-plan.md)
+[Project plan](docs/project-plan.md) · [M3 contracts](docs/m3-contracts.md)
 
 ## Features
 
@@ -39,6 +39,10 @@ execution, and a validated tiny F32 model. Attention and other unsupported
 operations still run on the CPU. FFN subgraph compilation, JIT, W8A8/W4A8,
 concurrent requests, and SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
+
+M3 step 1 defines the [FFN interfaces and semantic contract](docs/m3-contracts.md).
+The shared metadata headers are design contracts; FFN import, reference
+validation, region planning, and fused execution are not implemented yet.
 
 ## How it works
 
@@ -558,6 +562,8 @@ traffic or peak device memory.
 | [`src/runtime/`](src/runtime/) | M1 C++ runtime, VM/HAL and simulator ownership, tensor ABI, standalone runner |
 | [`src/ggml/`](src/ggml/) | Backend capability/routing logic, artifact and weight-cache integration, model runner |
 | [`src/support/`](src/support/) | Shared JSON output helpers |
+| [`src/contracts/`](src/contracts/) | M3 FFN ABI, shape, numerical policy, and tensor-role metadata |
+| [`src/planner/`](src/planner/) | M3 candidate/plan/rejection data contracts; planner implementation follows |
 | [`compiler/export_matmul.py`](compiler/export_matmul.py) | Export static F32 matmul shapes to StableHLO text |
 | [`tests/runtime/`](tests/runtime/) | Standalone runtime validation across compiled profiles |
 | [`tests/ggml/`](tests/ggml/) | Adapter boundaries, model comparisons, and performance measurements |
@@ -580,7 +586,9 @@ Local-only paths are excluded from Git:
 
 ### Where to start reading
 
-1. Read [the project plan](docs/project-plan.md) for the architecture and contracts.
+1. Read [the project plan](docs/project-plan.md) and the
+   [M3 FFN contract](docs/m3-contracts.md) for architecture, interfaces, and
+   the ordered implementation/acceptance steps.
 2. Follow [`compiler/export_matmul.py`](compiler/export_matmul.py) to see the
    tensor ABI in a small StableHLO module.
 3. Read [`src/runtime/matmul_runtime.h`](src/runtime/matmul_runtime.h) and
@@ -626,7 +634,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes FFN compilation, typed IR, AOT/JIT artifact management,
+Future work includes GGML-to-StableHLO FFN import and compilation, standard
+IR verification/reference evaluation, AOT/JIT artifact management,
 W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
 will be assigned separately from development milestones.
