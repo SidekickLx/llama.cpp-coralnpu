@@ -43,13 +43,15 @@ operations still run on the CPU. FFN subgraph compilation, JIT, W8A8/W4A8,
 concurrent requests, and SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
 
-M3 steps 1–4 provide the [FFN contracts](docs/m3-contracts.md),
+M3 frontend and planning work provides the [FFN contracts](docs/m3-contracts.md),
 [upstream graph integration](docs/m3-graph-export.md),
 [typed StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
-and the [per-operation GGML importer](docs/m3-importer.md).
+the [per-operation GGML importer](docs/m3-importer.md), and
+[FFN recognition and legality checks](docs/m3-fusion.md).
 Numerical tests cover composed GGML FFN fixtures and captured real-model matmul
-and split SwiGLU nodes during prefill/decode. Automatic FFN region discovery,
-legality/placement planning, and fused execution remain future work.
+and split SwiGLU nodes during prefill/decode. Fusion checks use upstream graph,
+use-count and allocation interfaces with no llama.cpp patch. Complete FFN
+member support, real same-split placement and fused execution remain future work.
 
 ## How it works
 
@@ -572,7 +574,7 @@ traffic or peak device memory.
 | [`src/ggml/`](src/ggml/) | Backend capability/routing logic, artifact and weight-cache integration, model runner |
 | [`src/support/`](src/support/) | Shared JSON output helpers |
 | [`src/contracts/`](src/contracts/) | M3 FFN ABI, shape, numerical policy, and tensor-role metadata |
-| [`src/planner/`](src/planner/) | M3 candidate/plan/rejection data contracts; planner implementation follows |
+| [`src/planner/`](src/planner/) | M3 FFN recognition, capability/legality checks, allocation dependencies and live guards |
 | [`compiler/export_matmul.py`](compiler/export_matmul.py) | Export static F32 matmul shapes to StableHLO text |
 | [`tests/runtime/`](tests/runtime/) | Standalone runtime validation across compiled profiles |
 | [`tests/ggml/`](tests/ggml/) | Adapter boundaries, model comparisons, and performance measurements |
@@ -634,7 +636,7 @@ above; exporter, target-flag, or compiler changes require matching VMFBs.
 | Runner refuses an output directory | Select a new directory; existing results are preserved |
 | No Coral offload occurs | Check dtype/layout/precision and whether shapes have compiled entries in `profiles.tsv` |
 | VMFB ABI or load failure | Use artifacts matching these shapes and pinned dependencies; inspect compiler/runtime logs |
-| CTest finds fewer than four tests | Enable M2/testing, build the test executable, and configure all three `M1_VMFB_M*` paths |
+| CTest finds fewer than five tests | Enable M2/testing, build the test executable, and configure all three `M1_VMFB_M*` paths |
 | Another terminal cannot find tools | Source `env.sh` before building or running preparation steps |
 
 ### Contributing and roadmap
@@ -643,7 +645,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes automatic FFN region discovery and legality checks,
+Future work includes complete FFN member support and same-split placement,
 full-region compilation and execution, AOT/JIT artifact management,
 W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
@@ -658,4 +660,5 @@ this repository does not relicense third-party materials.
 M3 development: [interface and semantic contract](docs/m3-contracts.md) and
 [upstream graph integration](docs/m3-graph-export.md), plus
 [StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
-and [GGML importer interfaces and tests](docs/m3-importer.md).
+[GGML importer interfaces and tests](docs/m3-importer.md),
+and [unpatched integration and fusion acceptance](docs/m3-unpatched-test-report.md).

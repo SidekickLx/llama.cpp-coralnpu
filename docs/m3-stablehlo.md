@@ -138,6 +138,7 @@ a correctness interpreter, not Coral inference performance or accelerator speed.
 
 The standalone builder remains a fixture generator. M3 step 4 now provides a
 separate [per-operation GGML importer](m3-importer.md), validated against actual
-GGML CPU execution, including captured real-model nodes. Automatic FFN matching,
-legality/placement checks and full real-region acceptance remain subsequent
-steps; full FFN Coral VMFB execution belongs to M4.
+GGML CPU execution, including captured real-model nodes.
+[FFN matching and legality checks](m3-fusion.md) now use upstream GGML interfaces.
+Complete member support, real same-split placement and full real-region
+acceptance remain subsequent steps; full FFN Coral VMFB execution belongs to M4.

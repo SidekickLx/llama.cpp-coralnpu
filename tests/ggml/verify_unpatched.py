@@ -52,6 +52,14 @@ def main():
           "--check-library", args.check_library.resolve(), "--model", args.model.resolve(),
           "--output-root", work / "model-importer"]),
     ]
+    fusion = subprocess.run([str(build / "coral-ffn-planner-test")],
+                            capture_output=True, text=True, timeout=120, check=False)
+    (work / "fusion.stdout.txt").write_text(fusion.stdout)
+    (work / "fusion.stderr.txt").write_text(fusion.stderr)
+    if fusion.returncode:
+        raise RuntimeError(f"fusion checks failed; retained evidence: {work}")
+    fusion_report = json.loads(fusion.stdout)
+    (work / "fusion.json").write_text(json.dumps(fusion_report, indent=2) + "\n")
     for label, script, options in suites:
         result = subprocess.run(
             [sys.executable, str(script), *map(str, options)],
@@ -63,7 +71,8 @@ def main():
         print(f"{label}: passed", flush=True)
     require_clean()
     report = {"status": "passed", "llama_revision": revision,
-              "llama_worktree_clean": True, "suites": [item[0] for item in suites]}
+              "llama_worktree_clean": True, "fusion_cases": fusion_report["count"],
+              "suites": ["fusion", *[item[0] for item in suites]]}
     (work / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({**report, "evidence": str(work)}))
 

@@ -388,10 +388,10 @@ preparation policy; it must preserve these error and ownership boundaries.
 | Step | Deliverable | Gate |
 | --- | --- | --- |
 | 1 (this change) | Metadata headers and semantic/interface contract | Consistent ABI, ownership, failure behavior and milestone boundaries |
-| 2 | Real GGML graph export | Reconstruct actual FFN edges, parameters, uses and placement without addresses |
+| 2 | Upstream graph integration | Scheduled views retain global uses; public evaluation callbacks and backend traces provide execution evidence |
 | 3 | StableHLO builder/verifier/reference integration | Valid small modules evaluate; malformed modules fail; pinned coverage recorded |
 | 4 | Per-op GGML importer | Each supported mapping agrees with GGML CPU and preserves parameters |
-| 5 | Candidate matcher and legality checks | Both FFN spellings recognized; unsafe cases rejected with reasons |
+| 5 | Candidate matcher and legality checks (initial implementation complete) | Both spellings, capability and live guards checked through unmodified upstream interfaces; see [tests](m3-fusion.md) |
 | 6 | Standalone member support and placement | Every assigned member executes legally; real FFN can occupy one split |
 | 7 | Full-region import and M3 acceptance | Real/synthetic FFN reference agreement and complete negative/lifetime cases |
 | M4 | AOT FFN artifact, independent runner, then GGML execution | Three-way numerical agreement, artifact compatibility and real device evidence |
@@ -407,7 +407,7 @@ Implementation locations: `src/contracts/` for shared metadata,
 `src/planner/` for region reasoning, `src/ggml/` for graph and live bindings,
 `compiler/` for standard IR tooling, and `src/runtime/` for invocation owners.
 New compiler/reference tests belong under `tests/compiler/` and planner tests
-under `tests/planner/` when those implementations are added.
+under `tests/ggml/` for the upstream scheduler integration.
 
 The initial integration must establish compatibility with the pinned StableHLO
 builder/interpreter. It must not claim coverage merely because the source is

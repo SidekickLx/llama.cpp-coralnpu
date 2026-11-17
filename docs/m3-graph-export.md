@@ -32,7 +32,7 @@ Build incrementally and run from the project root:
 
 ~~~bash
 source env.sh
-cmake --build build/m1 --target coral-llama-runner coral-adapter-test coral-ggml-import-test coral-model-import-test -j4
+cmake --build build/m1 --target coral-llama-runner coral-adapter-test coral-ggml-import-test coral-model-import-test coral-ffn-planner-test -j4
 python tests/ggml/verify_unpatched.py \
     --build-dir build/m1 \
     --check-library build/m3/libcoral-importer-check.so \
@@ -55,3 +55,8 @@ Logs, values, MLIR and reports remain in that ignored evidence directory.
 
 Fusion legality, member capability and full FFN device execution have their
 own acceptance gates; removal of the observer does not establish them.
+
+The final integrated run is described in
+[the unpatched test report](m3-unpatched-test-report.md).
+[FFN fusion checks](m3-fusion.md) now use the upstream optimization,
+global-use and allocation-dependency interfaces.

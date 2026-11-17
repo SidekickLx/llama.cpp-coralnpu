@@ -23,11 +23,18 @@ struct Options {
     bool immutable_model_weights = false;
     void (*trace)(const NodeEvent &, void *) = nullptr;
     void *trace_user_data = nullptr;
+    // The application owns scheduler callbacks. Keep the conservative default
+    // unless it guarantees that per-node evaluation callbacks are absent.
+    bool evaluation_callbacks = true;
 };
 
 struct Stats {
     runtime::RuntimeStats runtime;
     std::uint64_t graph_calls = 0;
+    std::uint64_t graph_optimizations = 0;
+    std::uint64_t ffn_candidates = 0;
+    std::uint64_t ffn_preparation_plans = 0;
+    std::uint64_t ffn_rejections = 0;
     std::uint64_t matmuls = 0;
     std::uint64_t weight_cache_hits = 0;
     std::uint64_t weight_preparations = 0;

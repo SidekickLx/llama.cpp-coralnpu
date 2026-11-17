@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "ggml_coral.h"
+#include "planner/ggml_fusion.h"
 #include "ggml-backend-impl.h"
 #include "ggml-cpu.h"
 #include <cstring>
@@ -99,6 +100,7 @@ struct BackendContext {
     std::map<ShapeKey, std::unique_ptr<LoadedModule>> modules;
     std::map<WeightKey, std::unique_ptr<PreparedWeight>> weights;
     bool failed = false;
+    std::uint64_t optimization_generation = 0;
 
     void Compute(ggml_tensor *node) {
         MatmulShape shape;
@@ -212,6 +214,50 @@ ggml_status GraphCompute(ggml_backend_t backend, ggml_cgraph *graph) {
     return GGML_STATUS_FAILED;
 }
 
+planner::MemberSupport QueryFFNMember(const ggml_tensor *node, void *) {
+    MatmulShape shape;
+    if (!Compatible(node, &shape)) {
+        return planner::MemberSupport::Unsupported;
+    }
+    return registration.artifacts.count(Key(shape))
+        ? planner::MemberSupport::Supported : planner::MemberSupport::MissingArtifact;
+}
+
+void GraphOptimize(ggml_backend_t backend, ggml_cgraph *graph,
+                   ggml_backend_graph_optimize_params *allocation) noexcept {
+    auto &context = *static_cast<BackendContext *>(backend->context);
+    ++registration.stats.graph_optimizations;
+    try {
+        if (context.failed) {
+            return;
+        }
+        const planner::FFNPolicy policy{
+            ++context.optimization_generation, registration.options.evaluation_callbacks,
+            QueryFFNMember, nullptr};
+        for (int i = 0; i < ggml_graph_n_nodes(graph); ++i) {
+            auto result = planner::PlanFFN(*graph, i, policy, allocation);
+            if (std::holds_alternative<std::monostate>(result)) {
+                continue;
+            }
+            ++registration.stats.ffn_candidates;
+            if (std::holds_alternative<planner::RegionRejection>(result)) {
+                ++registration.stats.ffn_rejections;
+            } else {
+                ++registration.stats.ffn_preparation_plans;
+            }
+        }
+        // Admission only. The current backend has no full-FFN executable.
+        // Keep every original node; M4 must prepare and revalidate before
+        // skipping members or invoking a fused program.
+    } catch (const std::exception &error) {
+        context.failed = true;
+        RecordError(error.what());
+    } catch (...) {
+        context.failed = true;
+        RecordError("unknown FFN planning exception");
+    }
+}
+
 ggml_backend_t InitBackend(ggml_backend_dev_t device, const char *params) {
     try {
         if (params && *params) {
@@ -225,6 +271,7 @@ ggml_backend_t InitBackend(ggml_backend_dev_t device, const char *params) {
         backend->iface.get_name = BackendName;
         backend->iface.free = FreeBackend;
         backend->iface.graph_compute = GraphCompute;
+        backend->iface.graph_optimize = GraphOptimize;
         backend->device = device;
         backend->context = context.release();
         return backend.release();

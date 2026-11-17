@@ -205,7 +205,7 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
 1. **接口与语义契约（已完成）**：共享元数据头文件、FFN ABI、
    数值策略、candidate/plan/executable 状态、编译/runtime 边界与失败语义。
 2. **真实图接入**：早期完整图导出已验证，现已移除其 scheduler 补丁与 observer。
-   后续使用上游 graph_optimize 的 split、全图使用计数和分配依赖；
+   已改用上游 graph_optimize 的 split、全图使用计数和分配依赖；
    cb_eval 与后端 dispatch trace 提供数值及实际执行证据。
 3. **标准 IR 基础设施（已完成）**：接通固定版本 StableHLO builder、MLIR/StableHLO verifier 和参考解释器。
    小程序能执行，非法类型/shape 能拒绝；记录实际支持范围。
@@ -213,17 +213,19 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
    验证 MUL_MAT、SILU、MUL 和 split GLU 的参数、维度及数值。
    当前只接收静态二维 dense F32；view、广播、layout 变换及未知参数明确拒绝。
    合成 GGML FFN 与真实模型 prefill/decode 的单节点对照通过。
-5. 识别 3 个 MUL_MAT 加 split GLU(SWIGLU)，以及 SILU+MUL 展开式。
-   实现候选区域与合法性检查；本步可用合成 schedule fixture 验证边界。
+5. **候选识别与合法性检查（已完成初版）**：识别 3 个 MUL_MAT 加 split GLU，
+   以及 SILU+MUL 展开式。通过未修改的上游 graph_optimize、全图使用计数和
+   add_alloc_dep 验证边界；33 个用例覆盖跨 split、view、callback、复用和存活期。
+   已接入 Coral 后端进行准入检查，不跳过节点或执行融合 FFN。
 6. 补齐受支持成员的独立 artifact/runtime 能力与 placement，确认真实 FFN
    完整落在同一 backend split。不能融合时，已接管成员仍可合法执行。
 7. 将完整真实/合成 FFN 转换成标准 StableHLO，运行 verifier 和 CPU reference，
    与 GGML CPU 对照；完成合法性、生命周期与拒绝用例，验收 M3。
 
-前四步的实现和验收证据见 [上游图接口](m3-graph-export.md)、
-[StableHLO 基础设施](m3-stablehlo.md) 与 [逐算子 importer](m3-importer.md)。
-当前已对照真实 GGML 算子和显式选择的合成 FFN，尚未完成真实 FFN 的自动识别、
-合法性与 placement 验证，不能据此验收整个 M3。
+当前实现和验收证据见 [上游图接口](m3-graph-export.md)、
+[StableHLO 基础设施](m3-stablehlo.md) 与 [逐算子 importer](m3-importer.md)、[融合检查](m3-fusion.md)。
+当前已完成算子对照和无补丁 planner 检查；真实 FFN 完整成员能力、
+同一 split placement 和完整区域验收仍待第 6、7 步，不能据此验收整个 M3。
 
 **融合合法性**
 

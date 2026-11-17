@@ -172,5 +172,7 @@ The earlier builder/verifier and reference suites also passed regression:
 M3 step 4 is complete for the admitted static F32 subset. Unsupported cases
 remain explicit errors. The importer provides semantic conversion and verified
 standard SSA; it does not infer fusion legality or change runtime placement.
-Next is FFN matching and legality analysis. Full-region Coral compilation,
+[FFN matching and legality checks](m3-fusion.md) are now implemented using
+unmodified upstream interfaces. Complete member support and real same-split
+placement are next. Full-region Coral compilation,
 dispatch evidence and CPU/StableHLO/Coral three-way comparison belong to M4.

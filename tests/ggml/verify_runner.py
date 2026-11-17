@@ -132,6 +132,12 @@ def run_suite(runner, model, artifacts, work):
         invoke(runner, ["--mode", "coral", "--model", model, "--output", coral,
                         "--tokens", cpu / "tokens.txt", "--artifacts", artifacts], "coral", work)
         candidate, actual = read_run(coral, "coral")
+        checks = candidate["stats"]
+        require(checks["graph_optimizations"] > 0 and checks["ffn_candidates"] > 0,
+                "upstream FFN planning hook was not exercised")
+        require(checks["ffn_preparation_plans"] == 0 and
+                checks["ffn_rejections"] == checks["ffn_candidates"],
+                "diagnostic callback or unsupported FFN was incorrectly admitted")
         require(candidate["vocab_size"] == baseline["vocab_size"] and len(actual) == len(reference),
                 "incompatible logit shapes")
         require((coral / "tokens.txt").read_bytes() == (cpu / "tokens.txt").read_bytes(), "Coral inputs differ")

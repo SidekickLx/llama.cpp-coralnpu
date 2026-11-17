@@ -164,6 +164,10 @@ void WriteStats(std::ostream &out, const adapter::Stats &after, const adapter::S
     const auto &a = after.runtime;
     const auto &b = before.runtime;
     out << "{\"graph_calls\":" << after.graph_calls - before.graph_calls
+        << ",\"graph_optimizations\":" << after.graph_optimizations - before.graph_optimizations
+        << ",\"ffn_candidates\":" << after.ffn_candidates - before.ffn_candidates
+        << ",\"ffn_preparation_plans\":" << after.ffn_preparation_plans - before.ffn_preparation_plans
+        << ",\"ffn_rejections\":" << after.ffn_rejections - before.ffn_rejections
         << ",\"matmuls\":" << after.matmuls - before.matmuls
         << ",\"weight_preparations\":" << after.weight_preparations - before.weight_preparations
         << ",\"weight_cache_hits\":" << after.weight_cache_hits - before.weight_cache_hits

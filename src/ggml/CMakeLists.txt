@@ -28,7 +28,7 @@ target_compile_options(coral-ffn-planner PRIVATE -Wall -Wextra -fexceptions)
 add_library(ggml-coral STATIC ggml_coral.cc)
 target_include_directories(ggml-coral PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_include_directories(ggml-coral PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
-target_link_libraries(ggml-coral PUBLIC ggml coral_m1_runtime)
+target_link_libraries(ggml-coral PUBLIC ggml coral_m1_runtime coral-ffn-planner)
 target_compile_options(ggml-coral PRIVATE -Wall -Wextra -fexceptions)
 
 add_executable(coral-llama-runner llama_runner.cc)
