@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+set(LLAMA_SOURCE_DIR "${PROJECT_SOURCE_DIR}/repos/llama.cpp" CACHE PATH "Pinned llama.cpp checkout")
+if(NOT EXISTS "${LLAMA_SOURCE_DIR}/ggml/src/ggml-backend-impl.h")
+    message(FATAL_ERROR "Initialize the pinned llama.cpp checkout before enabling M2.")
+endif()
+set(BUILD_SHARED_LIBS OFF)
+set(LLAMA_BUILD_COMMON OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_SERVER OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_APP OFF CACHE BOOL "" FORCE)
+set(LLAMA_OPENSSL OFF CACHE BOOL "" FORCE)
+set(GGML_BACKEND_DL OFF CACHE BOOL "" FORCE)
+set(GGML_BLAS OFF CACHE BOOL "" FORCE)
+set(GGML_CUDA OFF CACHE BOOL "" FORCE)
+set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+set(GGML_CPU_REPACK OFF CACHE BOOL "" FORCE)
+add_subdirectory("${LLAMA_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/llama" EXCLUDE_FROM_ALL)
+
+add_library(ggml-coral STATIC ggml_coral.cc)
+target_include_directories(ggml-coral PUBLIC "${PROJECT_SOURCE_DIR}/src")
+target_include_directories(ggml-coral PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
+target_link_libraries(ggml-coral PUBLIC ggml coral_m1_runtime)
+target_compile_options(ggml-coral PRIVATE -Wall -Wextra -fexceptions)
+
+add_executable(coral-llama-runner llama_runner.cc)
+target_link_libraries(coral-llama-runner PRIVATE ggml-coral llama)
+target_compile_options(coral-llama-runner PRIVATE -Wall -Wextra -fexceptions)
+set_target_properties(coral-llama-runner PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
+if(BUILD_TESTING)
+    add_executable(coral-adapter-test "${PROJECT_SOURCE_DIR}/tests/ggml/adapter_test.cc")
+    target_include_directories(coral-adapter-test PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
+    target_link_libraries(coral-adapter-test PRIVATE ggml-coral)
+    target_compile_options(coral-adapter-test PRIVATE -Wall -Wextra -fexceptions)
+    set_target_properties(coral-adapter-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+    if(M1_VMFB_M1 AND M1_VMFB_M16)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+        add_test(NAME m2_adapter_boundaries
+            COMMAND "${Python3_EXECUTABLE}" "${PROJECT_SOURCE_DIR}/tests/ggml/verify_adapter.py"
+                --runner "$<TARGET_FILE:coral-adapter-test>"
+                --m1-vmfb "${M1_VMFB_M1}"
+                --m16-vmfb "${M1_VMFB_M16}"
+                --output-root "${CMAKE_BINARY_DIR}/../m2-results")
+        set_tests_properties(m2_adapter_boundaries PROPERTIES TIMEOUT 300)
+    endif()
+endif()

@@ -1,0 +1,875 @@
+{
+  "schema": "coral-m2-test-report-v1",
+  "report_date": "2026-11-16",
+  "identity": {
+    "head": "fa601d707e68a19e542289c8ee4dee3cfa005945",
+    "runner_sha256": "d431b5c66c59972650bdb2281cfc579aaac409f7c3b211ca88ed4a9fe93986c7",
+    "model_sha256": "270cba1bd5109f42d03350f60406024560464db173c0e387d91f0426d3bd256d",
+    "tokens_sha256": "c4fa16a34ba02645234ef7cbc26c3731634ba7fbeacf50967ee4ecb497c035ba",
+    "source_sha256": {
+      "CMakeLists.txt": "c0d06cd30abf20c20ca248127ea2dc9675debcb85f119ec10d59d814db65d92c",
+      "src/ggml/CMakeLists.txt": "62c66e94ea4c5b162e973c31d679349238cf0f498339755872bda36cb1696902",
+      "src/ggml/ggml_coral.cc": "5c25c026df9760b9f6de3ab96fa701facb851c572e71b8dd48ffe6bf972acd8b",
+      "src/ggml/ggml_coral.h": "351e4732d9d7f5b678329aafe86fa4ec1f28c6dffb73131dbaba902447b84662",
+      "src/ggml/llama_runner.cc": "52b04289a3848e3d31fc09b7d1c31d1d94780be903a4f6bb136170a5c364b3a0",
+      "src/support/json.h": "15b5294b870d7d3652fd41c898bb776c303c723449a562e6db4c55e52bf31f65",
+      "src/runtime/matmul_runtime.cc": "85de0c460d3cd64e35ef1819508b60f755735e322d27c134b2d7be585f24ed13",
+      "src/runtime/matmul_runtime.h": "18733f57bd747c7506453b47a08d58396d2d2b41317df81563a441c256011219",
+      "tests/ggml/verify_runner.py": "2a692717a1b00011232437dd6812f3e3d70f9f6abba844d3a50a3494a8a456ab",
+      "tests/ggml/benchmark_runner.py": "b7acd974f845e470c0d1e79d656bcc523120a8d28261314f50863442b27552b8"
+    },
+    "vmfb_sha256": {
+      "m1_k172_n64.vmfb": "14f0adaf2f68122a10fe46107ff779596a038673e223148333292d4d4690ff75",
+      "m1_k64_n172.vmfb": "0963556cdd60d1f976be8cbbf14d7fd53f42ca5b9ec8ec43ef2a94c6835c0496",
+      "m1_k64_n32.vmfb": "c07686d1fe8230facbbef2adff078c6112052f2c31b1ba56ca9a218a16730ef0",
+      "m1_k64_n512.vmfb": "fa1f7b2b9ffcd395c42e2e7db4521e384d99bb914ba99a0737e90cb47e29971f",
+      "m1_k64_n64.vmfb": "c486a1d423b961563a577ddbcfe350c80dacc69de08e5d28a36a7a5ec2cdc31a",
+      "m5_k172_n64.vmfb": "f5e60fa4d35fc09160ccae533000d4463a742a79767a21032a9b2ec85e1bd05c",
+      "m5_k64_n172.vmfb": "3fadd7ef1f4cdd6fe1dcf02b3ceea631c8998501f3f1fbb1a47218b3dbad2982",
+      "m5_k64_n32.vmfb": "fe892dee66b39aca750f07336fe55cc72929d63ac3bd001e183293588ecb2f9a",
+      "m5_k64_n64.vmfb": "92cb3fa93d39479dc0d7ec373b084ec48623fd7439779d046a066337b9927d42"
+    },
+    "manifest_sha256": "c7f4d063388c8a7f8e9df6beeada2d5ba4a5577f248261e16eef58662bc4f2ef"
+  },
+  "environment": {
+    "system": "Linux",
+    "machine": "x86_64",
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "available_logical_cpus": 24,
+    "python": "3.13.18",
+    "inference_path": "/nonexistent"
+  },
+  "functional": {
+    "cpu_replay_exact": true,
+    "negative_cases": 6,
+    "coral_checked": true,
+    "max_abs_error": 7.152557373046875e-06,
+    "atol": 0.0001,
+    "rtol": 0.0001,
+    "logit_values": 2048,
+    "stats": {
+      "graph_calls": 184,
+      "matmuls": 144,
+      "weight_preparations": 36,
+      "weight_cache_hits": 108,
+      "failures": 0,
+      "module_loads": 9,
+      "calls_completed": 144,
+      "coral_dispatches": 256,
+      "instruction_samples": 256,
+      "kernel_instructions": 1447460,
+      "host_executable_load_attempts": 0,
+      "failed_dispatches": 0,
+      "observer_errors": 0,
+      "binding_allocations": 45,
+      "logical_upload_bytes": 1122496,
+      "logical_download_bytes": 97664,
+      "module_load_ms": 2.4415,
+      "invoke_ms": 134.593
+    }
+  },
+  "steps": [
+    {
+      "step": 0,
+      "phase": "prefill",
+      "input_tokens": 5,
+      "position": 0,
+      "logit_row": 0,
+      "argmax_token": 432,
+      "cpu_nodes": 80,
+      "cpu_matmuls": 10,
+      "coral_nodes": 36,
+      "wall_ms": 61.6631,
+      "stats": {
+        "graph_calls": 46,
+        "matmuls": 36,
+        "weight_preparations": 36,
+        "weight_cache_hits": 0,
+        "failures": 0,
+        "module_loads": 7,
+        "calls_completed": 36,
+        "coral_dispatches": 40,
+        "instruction_samples": 40,
+        "kernel_instructions": 573551,
+        "host_executable_load_attempts": 0,
+        "failed_dispatches": 0,
+        "observer_errors": 0,
+        "binding_allocations": 43,
+        "logical_upload_bytes": 1088368,
+        "logical_download_bytes": 55520,
+        "module_load_ms": 1.9133,
+        "invoke_ms": 57.3018
+      }
+    },
+    {
+      "step": 1,
+      "phase": "decode",
+      "input_tokens": 1,
+      "position": 5,
+      "logit_row": 1,
+      "argmax_token": 383,
+      "cpu_nodes": 80,
+      "cpu_matmuls": 10,
+      "coral_nodes": 36,
+      "wall_ms": 29.135,
+      "stats": {
+        "graph_calls": 46,
+        "matmuls": 36,
+        "weight_preparations": 0,
+        "weight_cache_hits": 36,
+        "failures": 0,
+        "module_loads": 2,
+        "calls_completed": 36,
+        "coral_dispatches": 72,
+        "instruction_samples": 72,
+        "kernel_instructions": 291303,
+        "host_executable_load_attempts": 0,
+        "failed_dispatches": 0,
+        "observer_errors": 0,
+        "binding_allocations": 2,
+        "logical_upload_bytes": 11376,
+        "logical_download_bytes": 14048,
+        "module_load_ms": 0.5282,
+        "invoke_ms": 27.2811
+      }
+    },
+    {
+      "step": 2,
+      "phase": "decode",
+      "input_tokens": 1,
+      "position": 6,
+      "logit_row": 2,
+      "argmax_token": 286,
+      "cpu_nodes": 80,
+      "cpu_matmuls": 10,
+      "coral_nodes": 36,
+      "wall_ms": 25.9591,
+      "stats": {
+        "graph_calls": 46,
+        "matmuls": 36,
+        "weight_preparations": 0,
+        "weight_cache_hits": 36,
+        "failures": 0,
+        "module_loads": 0,
+        "calls_completed": 36,
+        "coral_dispatches": 72,
+        "instruction_samples": 72,
+        "kernel_instructions": 291303,
+        "host_executable_load_attempts": 0,
+        "failed_dispatches": 0,
+        "observer_errors": 0,
+        "binding_allocations": 0,
+        "logical_upload_bytes": 11376,
+        "logical_download_bytes": 14048,
+        "module_load_ms": 0,
+        "invoke_ms": 24.962
+      }
+    },
+    {
+      "step": 3,
+      "phase": "decode",
+      "input_tokens": 1,
+      "position": 7,
+      "logit_row": 3,
+      "argmax_token": 261,
+      "cpu_nodes": 80,
+      "cpu_matmuls": 10,
+      "coral_nodes": 36,
+      "wall_ms": 26.1071,
+      "stats": {
+        "graph_calls": 46,
+        "matmuls": 36,
+        "weight_preparations": 0,
+        "weight_cache_hits": 36,
+        "failures": 0,
+        "module_loads": 0,
+        "calls_completed": 36,
+        "coral_dispatches": 72,
+        "instruction_samples": 72,
+        "kernel_instructions": 291303,
+        "host_executable_load_attempts": 0,
+        "failed_dispatches": 0,
+        "observer_errors": 0,
+        "binding_allocations": 0,
+        "logical_upload_bytes": 11376,
+        "logical_download_bytes": 14048,
+        "module_load_ms": 0,
+        "invoke_ms": 25.048
+      }
+    }
+  ],
+  "example_nodes": [
+    {
+      "kind": "node",
+      "step": 0,
+      "phase": "prefill",
+      "name": "Qcur-0",
+      "op": "MUL_MAT",
+      "placement": "CORAL",
+      "coral_compatible": true,
+      "output": {
+        "dtype": "f32",
+        "ne": [
+          64,
+          5,
+          1,
+          1
+        ],
+        "nb": [
+          4,
+          256,
+          1280,
+          1280
+        ],
+        "buffer_id": 1
+      },
+      "src0": {
+        "dtype": "f32",
+        "ne": [
+          64,
+          64,
+          1,
+          1
+        ],
+        "nb": [
+          4,
+          256,
+          16384,
+          16384
+        ],
+        "buffer_id": 2
+      },
+      "src1": {
+        "dtype": "f32",
+        "ne": [
+          64,
+          5,
+          1,
+          1
+        ],
+        "nb": [
+          4,
+          256,
+          1280,
+          1280
+        ],
+        "buffer_id": 1
+      },
+      "m": 5,
+      "k": 64,
+      "n": 64,
+      "op_params": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "dispatches": 1,
+      "instructions": 1116,
+      "weight_cache_hit": false
+    },
+    {
+      "kind": "node",
+      "step": 0,
+      "phase": "prefill",
+      "name": "kq-0",
+      "op": "MUL_MAT",
+      "placement": "CPU",
+      "coral_compatible": false,
+      "output": {
+        "dtype": "f32",
+        "ne": [
+          256,
+          5,
+          8,
+          1
+        ],
+        "nb": [
+          4,
+          1024,
+          5120,
+          40960
+        ],
+        "buffer_id": 1
+      },
+      "src0": {
+        "dtype": "f32",
+        "ne": [
+          8,
+          256,
+          4,
+          1
+        ],
+        "nb": [
+          4,
+          128,
+          32,
+          32768
+        ],
+        "buffer_id": 3
+      },
+      "src1": {
+        "dtype": "f32",
+        "ne": [
+          8,
+          5,
+          8,
+          1
+        ],
+        "nb": [
+          4,
+          256,
+          32,
+          1280
+        ],
+        "buffer_id": 1
+      },
+      "op_params": [
+        15,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "kind": "node",
+      "step": 1,
+      "phase": "decode",
+      "name": "Qcur-0",
+      "op": "MUL_MAT",
+      "placement": "CORAL",
+      "coral_compatible": true,
+      "output": {
+        "dtype": "f32",
+        "ne": [
+          64,
+          1,
+          1,
+          1
+        ],
+        "nb": [
+          4,
+          256,
+          256,
+          256
+        ],
+        "buffer_id": 1
+      },
+      "src0": {
+        "dtype": "f32",
+        "ne": [
+          64,
+          64,
+          1,
+          1
+        ],
+        "nb": [
+          4,
+          256,
+          16384,
+          16384
+        ],
+        "buffer_id": 2
+      },
+      "src1": {
+        "dtype": "f32",
+        "ne": [
+          64,
+          1,
+          1,
+          1
+        ],
+        "nb": [
+          4,
+          256,
+          256,
+          256
+        ],
+        "buffer_id": 1
+      },
+      "m": 1,
+      "k": 64,
+      "n": 64,
+      "op_params": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "dispatches": 2,
+      "instructions": 4206,
+      "weight_cache_hit": true
+    },
+    {
+      "kind": "node",
+      "step": 1,
+      "phase": "decode",
+      "name": "kq-0",
+      "op": "MUL_MAT",
+      "placement": "CPU",
+      "coral_compatible": false,
+      "output": {
+        "dtype": "f32",
+        "ne": [
+          256,
+          1,
+          8,
+          1
+        ],
+        "nb": [
+          4,
+          1024,
+          1024,
+          8192
+        ],
+        "buffer_id": 1
+      },
+      "src0": {
+        "dtype": "f32",
+        "ne": [
+          8,
+          256,
+          4,
+          1
+        ],
+        "nb": [
+          4,
+          128,
+          32,
+          32768
+        ],
+        "buffer_id": 3
+      },
+      "src1": {
+        "dtype": "f32",
+        "ne": [
+          8,
+          1,
+          8,
+          1
+        ],
+        "nb": [
+          4,
+          256,
+          32,
+          256
+        ],
+        "buffer_id": 1
+      },
+      "op_params": [
+        15,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "cpu_ops_per_step": {
+    "GET_ROWS": 3,
+    "RMS_NORM": 11,
+    "MUL": 11,
+    "ROPE": 10,
+    "SET_ROWS": 10,
+    "MUL_MAT": 10,
+    "SOFT_MAX": 5,
+    "CONT": 5,
+    "ADD": 10,
+    "GLU": 5
+  },
+  "buffers": [
+    {
+      "kind": "buffer",
+      "id": 1,
+      "bytes": 353280,
+      "type": "CPU",
+      "host": true,
+      "usage": 2
+    },
+    {
+      "kind": "buffer",
+      "id": 2,
+      "bytes": 1171200,
+      "type": "CPU_Mapped",
+      "host": true,
+      "usage": 1
+    },
+    {
+      "kind": "buffer",
+      "id": 3,
+      "bytes": 327680,
+      "type": "CPU",
+      "host": true,
+      "usage": 0
+    }
+  ],
+  "shape_counts": [
+    {
+      "step": 0,
+      "m": 1,
+      "k": 64,
+      "n": 172,
+      "calls": 2,
+      "dispatches": 4,
+      "instructions": 27172
+    },
+    {
+      "step": 0,
+      "m": 1,
+      "k": 64,
+      "n": 512,
+      "calls": 1,
+      "dispatches": 2,
+      "instructions": 33478
+    },
+    {
+      "step": 0,
+      "m": 1,
+      "k": 172,
+      "n": 64,
+      "calls": 1,
+      "dispatches": 2,
+      "instructions": 11863
+    },
+    {
+      "step": 0,
+      "m": 5,
+      "k": 64,
+      "n": 32,
+      "calls": 10,
+      "dispatches": 10,
+      "instructions": 6630
+    },
+    {
+      "step": 0,
+      "m": 5,
+      "k": 64,
+      "n": 64,
+      "calls": 10,
+      "dispatches": 10,
+      "instructions": 11160
+    },
+    {
+      "step": 0,
+      "m": 5,
+      "k": 64,
+      "n": 172,
+      "calls": 8,
+      "dispatches": 8,
+      "instructions": 472456
+    },
+    {
+      "step": 0,
+      "m": 5,
+      "k": 172,
+      "n": 64,
+      "calls": 4,
+      "dispatches": 4,
+      "instructions": 10792
+    },
+    {
+      "step": 1,
+      "m": 1,
+      "k": 64,
+      "n": 32,
+      "calls": 10,
+      "dispatches": 20,
+      "instructions": 20590
+    },
+    {
+      "step": 1,
+      "m": 1,
+      "k": 64,
+      "n": 64,
+      "calls": 10,
+      "dispatches": 20,
+      "instructions": 42060
+    },
+    {
+      "step": 1,
+      "m": 1,
+      "k": 64,
+      "n": 172,
+      "calls": 10,
+      "dispatches": 20,
+      "instructions": 135860
+    },
+    {
+      "step": 1,
+      "m": 1,
+      "k": 64,
+      "n": 512,
+      "calls": 1,
+      "dispatches": 2,
+      "instructions": 33478
+    },
+    {
+      "step": 1,
+      "m": 1,
+      "k": 172,
+      "n": 64,
+      "calls": 5,
+      "dispatches": 10,
+      "instructions": 59315
+    }
+  ],
+  "failure_excerpts": {
+    "existing-output": "coral-llama-runner: --output must be a new directory; previous results are preserved",
+    "bad-input": "coral-llama-runner: invalid or missing replay token",
+    "bad-vocab": "coral-llama-runner: replay token is outside this model's vocabulary",
+    "bad-artifacts": "coral-llama-runner: filesystem error: cannot make canonical path: No such file or directory [<workspace>/build/m2-results/runner-zo4vb2ki/missing-artifacts/missing.vmfb]",
+    "no-offload": "coral-llama-runner: Coral mode requires actual NPU dispatch in every prefill/decode step",
+    "corrupt-run": "coral-llama-runner: llama_decode failed (-3): load VMFB: iree/runtime/src/iree/vm/bytecode/archive.c:106: INVALID_ARGUMENT; FlatBuffer data is not present or less than 16 bytes (10 total)"
+  },
+  "benchmark": {
+    "repeats": 20,
+    "warmup_pairs": 2,
+    "trace_enabled": true,
+    "fresh_process_per_run": true,
+    "alternating_order": true,
+    "process_wait_method": "Linux pidfd + select (no polling sleeps)",
+    "p95_method": "linear interpolation at (n-1)*0.95",
+    "max_abs_logit_error_all_pairs": 7.152557373046875e-06,
+    "argmax_checks": 88,
+    "metrics": {
+      "cpu": {
+        "process_wall_ms": {
+          "n": 20,
+          "min": 18.0864,
+          "p50": 19.11255,
+          "p95": 21.019925,
+          "max": 21.1306,
+          "mean": 19.28909,
+          "stddev": 0.849276678650721
+        },
+        "peak_rss_mib": {
+          "n": 20,
+          "min": 17.20703125,
+          "p50": 17.56640625,
+          "p95": 17.6259765625,
+          "max": 17.79296875,
+          "mean": 17.515625,
+          "stddev": 0.1320347170402779
+        },
+        "prefill_wall_ms": {
+          "n": 20,
+          "min": 1.5364,
+          "p50": 1.6123500000000002,
+          "p95": 2.024645,
+          "max": 2.0844,
+          "mean": 1.66003,
+          "stddev": 0.13910999640572205
+        },
+        "first_decode_wall_ms": {
+          "n": 20,
+          "min": 0.8501,
+          "p50": 0.86545,
+          "p95": 0.938305,
+          "max": 0.9517,
+          "mean": 0.87825,
+          "stddev": 0.02993480415837057
+        },
+        "warm_decode_wall_ms": {
+          "n": 40,
+          "min": 0.7561,
+          "p50": 0.78175,
+          "p95": 0.84115,
+          "max": 0.9505,
+          "mean": 0.7932525,
+          "stddev": 0.03319070643644091
+        },
+        "total_step_wall_ms": {
+          "n": 20,
+          "min": 3.972,
+          "p50": 4.0760000000000005,
+          "p95": 4.473265,
+          "max": 4.5752,
+          "mean": 4.124785,
+          "stddev": 0.15745175856432986
+        },
+        "module_load_ms": {
+          "n": 20,
+          "min": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0.0
+        },
+        "vm_invoke_ms": {
+          "n": 20,
+          "min": 0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0,
+          "mean": 0,
+          "stddev": 0.0
+        },
+        "non_step_process_ms": {
+          "n": 20,
+          "min": 14.114400000000002,
+          "p50": 14.85405,
+          "p95": 16.980835,
+          "max": 17.0879,
+          "mean": 15.164305,
+          "stddev": 0.8394088750275398
+        },
+        "warm_invoke_share_percent": {
+          "n": 40,
+          "min": 0.0,
+          "p50": 0.0,
+          "p95": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "stddev": 0.0
+        },
+        "warm_decode_tokens_per_second_from_p50": 1279.1813239526705
+      },
+      "coral": {
+        "process_wall_ms": {
+          "n": 20,
+          "min": 155.07,
+          "p50": 157.0197,
+          "p95": 163.01282499999996,
+          "max": 163.1976,
+          "mean": 157.961365,
+          "stddev": 2.2510675441387793
+        },
+        "peak_rss_mib": {
+          "n": 20,
+          "min": 26.85546875,
+          "p50": 27.20703125,
+          "p95": 27.276953125,
+          "max": 27.34375,
+          "mean": 27.172265625,
+          "stddev": 0.11452642703862884
+        },
+        "prefill_wall_ms": {
+          "n": 20,
+          "min": 59.3108,
+          "p50": 59.7528,
+          "p95": 61.648765000000004,
+          "max": 64.1808,
+          "mean": 60.24011,
+          "stddev": 1.1381178976274828
+        },
+        "first_decode_wall_ms": {
+          "n": 20,
+          "min": 28.2813,
+          "p50": 28.54155,
+          "p95": 29.45263,
+          "max": 29.8142,
+          "mean": 28.70926,
+          "stddev": 0.4032293756660092
+        },
+        "warm_decode_wall_ms": {
+          "n": 40,
+          "min": 25.4747,
+          "p50": 25.97215,
+          "p95": 26.89434,
+          "max": 28.4081,
+          "mean": 26.0991775,
+          "stddev": 0.5040331851612055
+        },
+        "total_step_wall_ms": {
+          "n": 20,
+          "min": 139.0023,
+          "p50": 140.74970000000002,
+          "p95": 145.40718,
+          "max": 145.745,
+          "mean": 141.147725,
+          "stddev": 1.8497016156329111
+        },
+        "module_load_ms": {
+          "n": 20,
+          "min": 0.6091,
+          "p50": 0.6623,
+          "p95": 0.80169,
+          "max": 0.811,
+          "mean": 0.677315,
+          "stddev": 0.059486563819067584
+        },
+        "vm_invoke_ms": {
+          "n": 20,
+          "min": 132.825,
+          "p50": 134.1695,
+          "p95": 138.67700000000002,
+          "max": 138.753,
+          "mean": 134.6758,
+          "stddev": 1.6498174323239498
+        },
+        "non_step_process_ms": {
+          "n": 20,
+          "min": 16.034999999999997,
+          "p50": 16.58654999999999,
+          "p95": 17.72478499999999,
+          "max": 17.967700000000008,
+          "mean": 16.813639999999996,
+          "stddev": 0.5964267996996798
+        },
+        "warm_invoke_share_percent": {
+          "n": 40,
+          "min": 95.66085616398672,
+          "p50": 96.06661472375771,
+          "p95": 96.24853566229419,
+          "max": 96.3138679155118,
+          "mean": 96.02292987292469,
+          "stddev": 0.179516354467302
+        },
+        "warm_decode_tokens_per_second_from_p50": 38.50278086334786
+      }
+    }
+  },
+  "local_evidence_paths": {
+    "functional": "build/m2-results/runner-zo4vb2ki",
+    "benchmark": "build/m2-benchmarks/paired-h67yxncp",
+    "artifacts": "build/m2-artifacts/model-aot-c2u8iuxg"
+  }
+}

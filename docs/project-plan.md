@@ -1,3 +1,10 @@
+# 开发计划与版本约定
+
+> 版本约定更新（2026-11-16）：M1、M2 等标记表示开发里程碑，M2 验收不等于发布 v0.1.0。
+> 首个 v0.1.0 计划在 SoC 集成完成后再发布。下文保留原方案中的 v0.1/v0.2/v0.3
+> 阶段标签，供理解原始工作分组；它们不再代表 GitHub release 版本或承诺的发布顺序。
+> 原阶段中的 FFN、AOT/JIT、W8A8/W4A8 和驱动要求仍然有效。
+
 项目目标是在不购买硬件的 Linux 环境中，为 llama.cpp 开发 CoralNPU 后端，把 GGML 中受支持的矩阵乘和 SwiGLU FFN 子图编译为设备可执行产物，在 IREE runtime 与 MPACT 上运行；进一步完成 AOT/JIT、IR 优化、调度、内存与权重缓存，并将 W4A8（packed INT4 权重、INT8 activation）的设备端解包和混合精度执行纳入 v0.2 必做范围。后续扩展到 Renode 中的 ARM Linux 驱动集成。
 
 项目沿用此前 Tenstorrent 方案的分层与验收方式，但 CoralNPU 版从第一个矩阵乘实验开始使用编译产物：v0.1 交付 F32 可运行后端；v0.2 必须交付 FFN 编译、AOT/JIT、缓存、调度，以及 Q1 W8A8 基线和 Q2 W4A8 packed-weight 真正设备执行；v0.3 交付 Linux 驱动实验。W4A8 不要求改 RTL 原生 INT4 PE，而是由 NPU 端解包后复用整数计算路径。阶段、接口、目录和工时均为项目设计；资料基线日期为 2026 年 11 月 15 日，实际工具链组合在 M0 验证后固定。

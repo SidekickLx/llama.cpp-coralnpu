@@ -109,3 +109,8 @@ if(BUILD_TESTING)
         endif()
     endforeach()
 endif()
+
+option(CORAL_BUILD_M2 "Build the M2 GGML Coral integration" OFF)
+if(CORAL_BUILD_M2)
+    add_subdirectory(src/ggml)
+endif()
