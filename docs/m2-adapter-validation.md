@@ -2,7 +2,7 @@
 
 日期：2026-11-16。范围：固定版本 GGML + Coral adapter + MPACT，Linux x86_64 / WSL2。
 
-**结果：23 个独立测试进程、95 项检查全部通过；与已有模型闭环测试合起来，满足当前 M2 / v0.1 的验收范围。**
+**结果：23 个独立测试进程、95 项检查全部通过；与已有模型闭环测试合起来，满足当前 M2 的验收范围。**
 生产 adapter/runtime 无需修改。runner、模型测试和原性能报告已提交为 `34aecf0`；
 本轮新增独立回归程序、CTest 注册与验收证据。
 
@@ -40,7 +40,7 @@
 | 失败后的复用 | 两类失败后再次调用原 backend | 继续 FAILED，不恢复为成功 |
 
 非法元数据与未知参数只做能力查询，不送进可能断言的上游 CPU kernel。
-Q4_0 的范围是拒绝能力查询；本轮没有测试量化 kernel 数值，也不扩大 v0.1 的 F32 范围。
+Q4_0 的范围是拒绝能力查询；本轮没有测试量化 kernel 数值，也不扩大 M2 的 F32 范围。
 三维/broadcast 的 CPU 执行和二维的 row stride 是实际数值用例；
 其他被拒绝的 metadata 组合由能力查询覆盖。
 
@@ -115,6 +115,6 @@ python tests/ggml/verify_adapter.py \
 固定 token logits、真实 NPU 模拟执行与 runner 失败传播；
 本轮补齐原计划要求的独立 layout/dtype/precision 拒绝测试，以及权重缓存边界。
 
-M2 / v0.1 的功能验收证据现已齐备。测试范围仍是固定工具链、单线程、同步执行、F32 Coral matmul。
+M2 的功能验收证据现已齐备。测试范围仍是固定工具链、单线程、同步执行、F32 Coral matmul。
 长期并发、其他模型、完整 attention/FFN offload、量化执行和真实硬件性能不在本次验收中。
 本轮没有重跑性能 benchmark；原报告中的测量值继续对应原模型 runner 和原始测量记录。

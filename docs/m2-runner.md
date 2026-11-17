@@ -190,5 +190,5 @@ CPU 固定 token 重放的 logits 完全一致；Coral 与 CPU 的 2048 个 logi
 正例的 host executable 加载尝试、失败 dispatch 和 observer 错误均为 0。
 推理验证进程的 PATH 中没有编译器或 shell。
 
-这些模型结果与后续 [独立 adapter 验证](m2-adapter-validation.md) 共同构成 M2 / v0.1 的功能验收证据。
+这些模型结果与后续 [独立 adapter 验证](m2-adapter-validation.md) 共同构成 M2 的功能验收证据。
 硬件性能和完整设备内存统计不在本次验收范围。

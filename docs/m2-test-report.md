@@ -224,7 +224,7 @@ python tests/ggml/benchmark_runner.py \
 本报告确认小模型推理调用链、严格 F32 Coral matmul、固定 token 数值对照、实际 dispatch、
 权重复用以及 runner 失败传播。后续 [独立 adapter 验证](m2-adapter-validation.md) 已补齐
 原计划的 dtype/stride/广播/precision/可变权重等边界：23 个独立进程、95 项检查全部通过。
-两份报告共同满足当前 M2 / v0.1 功能验收范围。未覆盖其他模型、长上下文、多线程/并发、
+两份报告共同满足当前 M2 功能验收范围。未覆盖其他模型、长上下文、多线程/并发、
 完整模型 RVV-only 对照及硬件执行。本报告性能数据未变，仍对应原始测量。
 
 后续性能工作宜先细分 VM 调用内的耗时，再检查高指令数 shape；FFN 融合与减少中间回读
