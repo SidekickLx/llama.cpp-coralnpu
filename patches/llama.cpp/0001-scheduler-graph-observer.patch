@@ -1,0 +1,70 @@
+diff --git a/ggml/include/ggml-backend.h b/ggml/include/ggml-backend.h
+index afb8633..79888a7 100644
+--- a/ggml/include/ggml-backend.h
++++ b/ggml/include/ggml-backend.h
+@@ -384,6 +384,16 @@ extern "C" {
+     // The correct way to use this API is to discard the deallocated tensors and create new ones.
+     GGML_API void                 ggml_backend_sched_reset(ggml_backend_sched_t sched);
+ 
++    // Project observer extension, version 1. The callback is read-only.
++    // split_index == -1: complete graph before scheduler input rewriting.
++    // split_index >= 0: actual split before execution, including reused graphs.
++    // Pointers are borrowed for the callback only. Do not mutate or throw.
++    typedef void (*ggml_backend_sched_graph_observer)(
++        ggml_backend_sched_t sched, struct ggml_cgraph * graph,
++        int split_index, ggml_backend_t backend, void * user_data);
++    GGML_API void ggml_backend_sched_set_graph_observer(
++        ggml_backend_sched_t sched, ggml_backend_sched_graph_observer callback, void * user_data);
++
+     // Set a callback to be called for each resulting node during graph compute
+     GGML_API void                 ggml_backend_sched_set_eval_callback(ggml_backend_sched_t sched, ggml_backend_sched_eval_callback callback, void * user_data);
+ 
+diff --git a/ggml/src/ggml-backend.cpp b/ggml/src/ggml-backend.cpp
+index 2e2f9c0..b6fedfe 100644
+--- a/ggml/src/ggml-backend.cpp
++++ b/ggml/src/ggml-backend.cpp
+@@ -1224,6 +1224,9 @@ struct ggml_backend_sched {
+ 
+     struct ggml_context * ctx;
+ 
++    ggml_backend_sched_graph_observer callback_graph_observer;
++    void * callback_graph_observer_user_data;
++
+     ggml_backend_sched_eval_callback callback_eval;
+     void * callback_eval_user_data;
+ 
+@@ -1481,6 +1484,9 @@ static void ggml_backend_sched_set_if_supported(ggml_backend_sched_t sched, stru
+ 
+ // assigns backends to ops and splits the graph into subgraphs that can be computed on the same backend
+ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgraph * graph) {
++    if (sched->callback_graph_observer) {
++        sched->callback_graph_observer(sched, graph, -1, NULL, sched->callback_graph_observer_user_data);
++    }
+     // reset splits
+     sched->n_splits = 0;
+     sched->n_graph_inputs = 0;
+@@ -2221,6 +2227,11 @@ static enum ggml_status ggml_backend_sched_compute_splits(ggml_backend_sched_t s
+         int split_backend_id = split->backend_id;
+         ggml_backend_t split_backend = sched->backends[split_backend_id];
+ 
++        if (sched->callback_graph_observer) {
++            sched->callback_graph_observer(sched, &split->graph, split_id, split_backend,
++                                           sched->callback_graph_observer_user_data);
++        }
++
+         // ensure the previous split's async work has completed before we start
+         // this split, the allocator may have reused buffer regions across splits
+         if (split->n_inputs == 0 && prev_backend_id >= 0 && prev_backend_id != split_backend_id) {
+@@ -2500,6 +2511,12 @@ void ggml_backend_sched_synchronize(ggml_backend_sched_t sched) {
+     }
+ }
+ 
++void ggml_backend_sched_set_graph_observer(ggml_backend_sched_t sched, ggml_backend_sched_graph_observer callback, void * user_data) {
++    GGML_ASSERT(sched);
++    sched->callback_graph_observer = callback;
++    sched->callback_graph_observer_user_data = user_data;
++}
++
+ void ggml_backend_sched_set_eval_callback(ggml_backend_sched_t sched, ggml_backend_sched_eval_callback callback, void * user_data) {
+     GGML_ASSERT(sched);
+     sched->callback_eval = callback;

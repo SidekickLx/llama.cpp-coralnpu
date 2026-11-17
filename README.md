@@ -278,6 +278,13 @@ Patched submodules appearing modified is expected. See the
 [pinned upstream instructions](https://github.com/google-coral/coralnpu-compiler/blob/770dc9332dffed8ff91d8cface7e9d176227d912/README.md)
 for dependency details.
 
+Apply this project's hash-checked scheduler observation patch after fetching
+the pinned checkouts. This command is safe to repeat and never resets local changes.
+
+~~~bash
+python scripts/apply_dependency_patches.py
+~~~
+
 ### 5. Build the compiler, simulator, and runners
 
 First build the compiler and MPACT shared library. This is the expensive step;
@@ -645,3 +652,6 @@ will be assigned separately from development milestones.
 Original work is licensed under the [MIT License](LICENSE). Referenced and
 downloaded upstream projects and models retain their respective licenses;
 this repository does not relicense third-party materials.
+
+M3 development: [interface and semantic contract](docs/m3-contracts.md) and
+[real GGML graph export](docs/m3-graph-export.md).
