@@ -136,7 +136,8 @@ reference evaluation, excluding JSON parsing/serialization and process startup.
 The build uses the upstream development configuration. These numbers describe
 a correctness interpreter, not Coral inference performance or accelerator speed.
 
-M3 steps 1–3 are implemented. The standalone FFN builder has not imported real
-GGML node semantics, identified a legal region, or fused graph execution.
-The next step is the per-operation GGML-to-StableHLO importer, followed by
-matching, legality/placement checks, and real GGML CPU/reference comparison.
+The standalone builder remains a fixture generator. M3 step 4 now provides a
+separate [per-operation GGML importer](m3-importer.md), validated against actual
+GGML CPU execution, including captured real-model nodes. Automatic FFN matching,
+legality/placement checks and full real-region acceptance remain subsequent
+steps; full FFN Coral VMFB execution belongs to M4.

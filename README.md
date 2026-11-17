@@ -31,8 +31,9 @@ is reserved for SoC integration; completing M2 does not constitute that release.
   the graph, and performs short prefill and decode runs.
 - **Execution evidence:** per-node placement, successful Coral dispatches,
   simulator kernel instruction counts, and module/weight-cache statistics.
-- **M3 frontend foundations:** original DAG and actual split snapshots, official
-  StableHLO typed ops/verifier, and the upstream CPU reference interpreter.
+- **M3 frontend foundations:** original DAG and actual split snapshots, direct
+  GGML-to-StableHLO import for static F32 matmul, SiLU, multiply and split SwiGLU,
+  official typed ops/verifier, and the upstream CPU reference interpreter.
 - **Numerical and failure tests:** fixed-token CPU/Coral comparison, adapter
   capability boundaries, mixed graphs, mutable weights, and error propagation.
 
@@ -42,11 +43,13 @@ operations still run on the CPU. FFN subgraph compilation, JIT, W8A8/W4A8,
 concurrent requests, and SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
 
-M3 steps 1–3 provide the [FFN contracts](docs/m3-contracts.md),
-[real GGML graph export](docs/m3-graph-export.md), and
-[typed StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md).
-Standalone matmul/FFN fixtures pass numerical tests. Importing real GGML regions,
-region planning, and fused execution remain future work.
+M3 steps 1–4 provide the [FFN contracts](docs/m3-contracts.md),
+[real GGML graph export](docs/m3-graph-export.md),
+[typed StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
+and the [per-operation GGML importer](docs/m3-importer.md).
+Numerical tests cover composed GGML FFN fixtures and captured real-model matmul
+and split SwiGLU nodes during prefill/decode. Automatic FFN region discovery,
+legality/placement planning, and fused execution remain future work.
 
 ## How it works
 
@@ -645,8 +648,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes GGML-to-StableHLO FFN import and compilation, standard
-IR verification/reference evaluation, AOT/JIT artifact management,
+Future work includes automatic FFN region discovery and legality checks,
+full-region compilation and execution, AOT/JIT artifact management,
 W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
 will be assigned separately from development milestones.
@@ -659,6 +662,5 @@ this repository does not relicense third-party materials.
 
 M3 development: [interface and semantic contract](docs/m3-contracts.md) and
 [real GGML graph export](docs/m3-graph-export.md), plus
-[StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md).
-
-[GGML importer interfaces and tests](docs/m3-importer.md).
+[StableHLO construction, verification and reference evaluation](docs/m3-stablehlo.md),
+and [GGML importer interfaces and tests](docs/m3-importer.md).

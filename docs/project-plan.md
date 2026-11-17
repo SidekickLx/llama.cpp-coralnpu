@@ -208,8 +208,10 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
    consumer 和 placement。图导出不携带本机地址。
 3. **标准 IR 基础设施（已完成）**：接通固定版本 StableHLO builder、MLIR/StableHLO verifier 和参考解释器。
    小程序能执行，非法类型/shape 能拒绝；记录实际支持范围。
-4. 实现逐算子 GGML→StableHLO importer，验证 MUL_MAT、SILU、MUL 和
-   split GLU 的参数、维度及数值；layout 变换只通过显式验收的规则接入。
+4. **逐算子 importer（已完成）**：直接从 GGML 元数据构造标准 StableHLO，
+   验证 MUL_MAT、SILU、MUL 和 split GLU 的参数、维度及数值。
+   当前只接收静态二维 dense F32；view、广播、layout 变换及未知参数明确拒绝。
+   合成 GGML FFN 与真实模型 prefill/decode 的单节点对照通过。
 5. 识别 3 个 MUL_MAT 加 split GLU(SWIGLU)，以及 SILU+MUL 展开式。
    实现候选区域与合法性检查；本步可用合成 schedule fixture 验证边界。
 6. 补齐受支持成员的独立 artifact/runtime 能力与 placement，确认真实 FFN
@@ -217,9 +219,10 @@ Y = \left(\operatorname{SiLU}(XW_{gate}^{T}) \odot XW_{up}^{T}\right)W_{down}^{T
 7. 将完整真实/合成 FFN 转换成标准 StableHLO，运行 verifier 和 CPU reference，
    与 GGML CPU 对照；完成合法性、生命周期与拒绝用例，验收 M3。
 
-前三步的实现和验收证据见 [图导出](m3-graph-export.md) 与
-[StableHLO 基础设施](m3-stablehlo.md)。当前 FFN reference 使用独立数值 fixture，
-尚未完成真实 GGML region 的导入与对照，不能据此验收整个 M3。
+前四步的实现和验收证据见 [图导出](m3-graph-export.md)、
+[StableHLO 基础设施](m3-stablehlo.md) 与 [逐算子 importer](m3-importer.md)。
+当前已对照真实 GGML 算子和显式选择的合成 FFN，尚未完成真实 FFN 的自动识别、
+合法性与 placement 验证，不能据此验收整个 M3。
 
 **融合合法性**
 
