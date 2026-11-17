@@ -24,3 +24,8 @@ target_include_directories(ggml-coral PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_include_directories(ggml-coral PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
 target_link_libraries(ggml-coral PUBLIC ggml coral_m1_runtime)
 target_compile_options(ggml-coral PRIVATE -Wall -Wextra -fexceptions)
+
+add_executable(coral-llama-runner llama_runner.cc)
+target_link_libraries(coral-llama-runner PRIVATE ggml-coral llama)
+target_compile_options(coral-llama-runner PRIVATE -Wall -Wextra -fexceptions)
+set_target_properties(coral-llama-runner PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
