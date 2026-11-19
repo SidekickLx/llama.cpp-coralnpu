@@ -105,6 +105,9 @@ endif()
 # Configuration never exports, compiles or executes a test artifact.
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(coral-aot-environment-probe tests/deployment/environment_probe.cc)
+    target_include_directories(coral-aot-environment-probe PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_compile_options(coral-aot-environment-probe PRIVATE -Wall -Wextra -fexceptions)
     foreach(m IN ITEMS 1 16 32)
         set(M1_VMFB_M${m} "" CACHE FILEPATH
             "M1 strict F32 VMFB for M=${m}, K=16, N=8")
