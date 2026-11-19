@@ -261,12 +261,15 @@ GGML 的 graph_optimize 在 scheduler 切分后运行，不能自然跨过分给
 
 M0/M1 已经完成单算子 AOT。本阶段把它推广为可独立发布、重载和验证的 FFN artifact。
 
-当前实施状态（2026-11-18）：M4 实施顺序的前四步已完成：artifact 契约、
-完整 FFN AOT 编译入口、独立 FFN runtime、独立 runner 与三方验收。
+当前实施状态（2026-11-18）：M4 实施顺序的前五步已完成：artifact 契约、
+完整 FFN AOT 编译入口、独立 FFN runtime、独立 runner 与三方验收、GGML region 执行。
 14 组合成案例和真实模型的 20 段 FFN，在 9 组 exact profile 上通过
 GGML CPU / 官方 StableHLO interpreter / Coral MPACT 对照与跨进程重载。
-这里的实施步骤并非下方长期任务清单的序号。完整 region 尚未接入 GGML
-backend，compiler 入口物理不可用的最终部署验收也仍待后续完成。
+这里的实施步骤并非下方长期任务清单的序号。完整 region 已接入未打补丁的
+GGML backend；真实模型执行 20 次完整 FFN，和逐算子路径 logits 完全一致，
+外层 VM 调用从 164 次降到 104 次。MPACT 测量未显示延迟加速。
+compiler 入口物理不可用的最终部署验收仍待后续完成。
+见 [GGML region 测试报告](m4-ggml-region-test-report.md)。
 见 [artifact/runtime guide](m4-artifacts.md)、[runner guide](m4-runner.md)
 和 [runner 测试报告](m4-runner-test-report.md)。
 

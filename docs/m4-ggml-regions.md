@@ -103,3 +103,8 @@ The fixture paths above refer to retained local evidence. For a new workspace,
 produce member artifacts using the M2/M3 guides and complete FFN packages using
 `m4-artifacts.md`. The test copies packages to a fresh output directory and
 preserves prior evidence; it does not compile or download artifacts.
+
+See the [region acceptance report](m4-ggml-region-test-report.md) for the
+real-model member/region comparison, execution evidence and measured timings.
+The separate `tests/ggml/verify_ffn_regions.py` suite uses the same three
+artifact-directory arguments as the backend suite above.
