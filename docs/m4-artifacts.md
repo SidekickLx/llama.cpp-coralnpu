@@ -18,7 +18,7 @@ A package contains:
 | `region.stablehlo.mlir` | Verified, normalized standard computation; weights remain arguments |
 | `region.vmfb` | Compiled IREE module, with `coral.m4.ffn.abi` function reflection |
 | `region.metadata.json` | Source correspondence and diagnostic provenance, outside semantic identity |
-| `placement.json` | Hashed per-dispatch device placement and matching summary |
+| `placement.json` | Hashed unique executable exports and scheduling placement summary |
 
 Exactly four F32 dense row-major inputs are required, in activation/gate/up/down
 order, followed by one output. The schema, program pipeline and numeric policy
@@ -61,3 +61,73 @@ Evidence: `build/m4-contract-results/contract-m52fub4u/report.json`.
 One valid contract-only fixture and 54 negative cases pass. These fixture VMFB
 bytes intentionally are not executable: this milestone tests integrity and
 compatibility before the IREE loader, not device execution.
+
+## Step 2: complete FFN AOT compilation
+
+Status: implemented and verified for six static profiles. This compiles an
+entire imported FFN into one VMFB; the compiler may generate several device
+dispatches. It does not promise one machine kernel.
+
+The input is the actual standard StableHLO emitted by the M3 GGML importer.
+The pinned StableHLO verifier checks IR validity; the AOT admission check then
+matches the full SSA computation against the positional FFN contract, including
+argument roles, dot properties, constants, types and numeric policy. Valid IR
+with incorrect FFN semantics is rejected. No custom dialect or numerical
+interpreter is introduced.
+
+After admission, diagnostic graph/tensor IDs move into source metadata.
+Independent operation order and accepted commutative spellings are normalized.
+The actual imported operations are compiled, not replaced by a shape template.
+The semantic digest excludes runtime values, source identities and locations.
+The reflection binds this digest to the runtime compatibility and ABI.
+
+~~~bash
+source env.sh
+bash scripts/build_m3.sh
+cmake --build build/m1 --target coral-ffn-artifact-check -j4
+python compiler/compile_ffn.py \
+  --input PATH_TO_M3_CAPTURE/imported.mlir \
+  --m 1 --d 64 --f 172 \
+  --output build/my-ffn-decode
+~~~
+
+The output must be a new directory. Compilation occurs in a sibling staging
+directory; failed builds retain their logs. Only a completely validated package
+is published, atomically and without replacing an existing directory. The
+runtime never needs the compiler. Automatic cache lookup and JIT are not
+implemented in this milestone.
+
+The compiler records the actual compiler/linker/CRT binary hashes and checks
+the source lock and runtime compatibility. Numerical work must be assigned to
+Coral. The affinity report counts scheduled dispatch sites; the executable
+dumps enumerate unique exports. Deduplication can reuse an export at several
+sites (for example, the two weight transposes in decode). These counts are
+recorded separately. Every exported executable must target Coral.
+
+Reproduce the compiler gate using retained M3 importer evidence:
+
+~~~bash
+python tests/compiler/verify_ffn_aot.py \
+  --fixtures PATH_TO_SYNTHETIC_FFN_IMPORT_EVIDENCE \
+  --real-fixtures PATH_TO_MODEL_FFN_EVIDENCE
+~~~
+
+Evidence: `build/m4-aot-results/aot-cvoknmn_/report.json`. Fourteen
+imported programs pass semantic normalization, ten invalid semantic variants
+are rejected, and seven equivalent source spellings produce the same semantic
+identity. Round-trip normalization, overwrite rejection and failed-publication
+rejection also pass.
+
+| Profile | M / D / F | Scheduled Coral dispatches | Unique exports |
+| --- | --- | --- | --- |
+| tiny | 2 / 3 / 4 | 3 | 3 |
+| real-decode | 1 / 64 / 172 | 6 | 5 |
+| real-prefill | 5 / 64 / 172 | 3 | 3 |
+| profile-m1 | 1 / 128 / 256 | 6 | 5 |
+| profile-m16 | 16 / 128 / 256 | 3 | 3 |
+| profile-m32 | 32 / 128 / 256 | 3 | 3 |
+
+All six profiles contain zero host numerical dispatches. These are compilation
+results; runtime correctness and actual MPACT execution are a separate gate.
+The updated artifact validator also passes the 54 contract negative cases;
+evidence: `build/m4-contract-results/contract-9m6spbnx/report.json`.

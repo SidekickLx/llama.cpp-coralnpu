@@ -196,16 +196,21 @@ FFNArtifact LoadFFNArtifact(const std::string &directory,
             // The producer supplies detailed dispatch evidence; the summary
             // cannot disagree with its hashed report.
             const auto evidence = Parse(bytes);
-            Keys(evidence, {"summary", "dispatches"});
+            Keys(evidence, {"summary", "executables"});
             Same(evidence.at("summary"), placement, "placement summary");
-            Require(evidence.at("dispatches").is_array() &&
-                    evidence.at("dispatches").size() == placement.at("coral_dispatches"),
-                    "incomplete placement evidence");
-            for (const auto &dispatch : evidence.at("dispatches")) {
-                Keys(dispatch, {"name", "target"});
-                Require(dispatch.at("name").is_string() && !dispatch.at("name").get<std::string>().empty(),
-                        "dispatch name missing");
-                Same(dispatch.at("target"), "coralnpu", "dispatch target");
+            const auto &executables = evidence.at("executables");
+            Require(executables.is_array() && !executables.empty() &&
+                    executables.size() <= placement.at("coral_dispatches"),
+                    "incomplete executable placement evidence");
+            // Deduplication can reuse one export at multiple dispatch sites.
+            std::set<std::string> names;
+            for (const auto &executable : executables) {
+                Keys(executable, {"name", "target"});
+                Require(executable.at("name").is_string(), "executable name missing");
+                const auto name = executable.at("name").get<std::string>();
+                Require(!name.empty() && names.insert(name).second,
+                        "executable name missing or duplicated");
+                Same(executable.at("target"), "coralnpu", "executable target");
             }
         } else {
             Require(Parse(bytes).is_object(), "source metadata must be an object");

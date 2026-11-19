@@ -31,7 +31,7 @@ def main():
     write_json(fixture / "region.metadata.json", {"fixture": "contract-only"})
     placement = {"numerical_target": "coralnpu", "host_dispatches": 0, "coral_dispatches": 1}
     write_json(fixture / "placement.json", {
-        "summary": placement, "dispatches": [{"name": "fixture_dispatch", "target": "coralnpu"}]})
+        "summary": placement, "executables": [{"name": "fixture_dispatch", "target": "coralnpu"}]})
     support = {name: "1" * 64 for name in ("linker", "linker_script", "iree_archive", "crt_archive")}
     valid = make_manifest(fixture, description, "2" * 64, support, placement)
     write_json(fixture / "manifest.json", valid)

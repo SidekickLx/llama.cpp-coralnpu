@@ -4,6 +4,20 @@
 
 int main(int argc, char **argv) {
     mlir::MLIRContext context;
+    if (argc == 8 && llvm::StringRef(argv[1]) == "prepare-ffn") {
+        coral::contracts::FFNCompileSpec spec;
+        if (llvm::StringRef(argv[3]).getAsInteger(10, spec.shape.m) ||
+            llvm::StringRef(argv[4]).getAsInteger(10, spec.shape.d) ||
+            llvm::StringRef(argv[5]).getAsInteger(10, spec.shape.f)) return 1;
+        auto module = coral::compiler::ReadModule(context, argv[2]);
+        return !module || mlir::failed(coral::compiler::PrepareFFNAOT(
+            *module, spec, argv[6], argv[7])) ? 1 : 0;
+    }
+    if (argc == 5 && llvm::StringRef(argv[1]) == "bind-ffn-reflection") {
+        auto module = coral::compiler::ReadModule(context, argv[2]);
+        return !module || mlir::failed(coral::compiler::BindFFNReflection(
+            *module, argv[3], argv[4])) ? 1 : 0;
+    }
     if (argc == 3 && llvm::StringRef(argv[1]) == "verify") {
         auto module = coral::compiler::ReadModule(context, argv[2]);
         return module ? 0 : 1;
@@ -54,6 +68,8 @@ int main(int argc, char **argv) {
         }
         return mlir::failed(coral::compiler::WriteModule(*module, argv[5])) ? 1 : 0;
     }
+    llvm::errs() << "       coral-stablehlo-tool prepare-ffn INPUT M D F NEW_IR NEW_METADATA\n"
+                 << "       coral-stablehlo-tool bind-ffn-reflection INPUT REFLECTION NEW_IR\n";
     llvm::errs() << "Usage: coral-stablehlo-tool emit-ffn M D F NEW_FILE\n"
                  << "       coral-stablehlo-tool emit-matmul M K N NEW_FILE\n"
                  << "       coral-stablehlo-tool emit-pointwise silu|multiply|swiglu M N NEW_FILE\n"
