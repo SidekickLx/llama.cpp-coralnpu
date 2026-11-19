@@ -1,5 +1,8 @@
 # M4 step 5: GGML complete FFN region acceptance
 
+Later acceptance: the [compiler-free deployment gate](m4-deployment-test-report.md)
+has now passed. Scope statements below describe this report's original test run.
+
 Date: 2026-11-18. **Passed within the scope below.**
 Implementation commit: `eb0b63a` on `codex/m4-ffn-aot`.
 

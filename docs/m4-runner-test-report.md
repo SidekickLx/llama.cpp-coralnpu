@@ -1,5 +1,8 @@
 # M4 step 4: independent FFN runner acceptance
 
+Later acceptance: the [compiler-free deployment gate](m4-deployment-test-report.md)
+has now passed. Scope statements below describe this report's original test run.
+
 Date: 2026-11-18. **Passed.** The standalone runner executes complete FFN AOT
 packages with supplied tensor data. The acceptance suite compares fresh GGML
 CPU, the official StableHLO interpreter and actual Coral MPACT execution.

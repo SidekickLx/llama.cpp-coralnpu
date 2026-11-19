@@ -1,5 +1,8 @@
 # M4 steps 1–3: validation report
 
+Later acceptance: the [compiler-free deployment gate](m4-deployment-test-report.md)
+has now passed. Scope statements below describe this report's original test run.
+
 Date: 2026-11-18. Scope: artifact contract, complete FFN AOT compiler entry,
 and independent FFN runtime. These three implementation milestones pass.
 This is not acceptance of all M4 work. Subsequent independent runner results

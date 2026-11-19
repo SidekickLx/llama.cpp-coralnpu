@@ -13,10 +13,12 @@ to MPACT through IREE.
 **Status: unreleased research prototype.** M1 (standalone runtime), M2
 (GGML integration and a small model), and M3 (F32 FFN import, reference semantics
 and placement legality) have passed their scoped functional acceptance tests.
-M4 steps 1–5 provide [complete FFN AOT artifacts and an independent runtime](docs/m4-artifacts.md),
+M4 provides [complete FFN AOT artifacts and an independent runtime](docs/m4-artifacts.md),
 a [standalone runner with three-way numerical acceptance](docs/m4-runner.md), and
 [complete-region GGML execution](docs/m4-ggml-regions.md).
-Full M4 acceptance is still pending. These are development milestones. The first `v0.1.0` release
+Its [compiler-free deployment gate](docs/m4-deployment-test-report.md) has also
+passed, completing the planned M4 AOT software acceptance scope.
+These are development milestones. The first `v0.1.0` release
 is reserved for SoC integration; completing M2 does not constitute that release.
 
 [Quick start](#quick-start) · [Tests](#tests) ·
@@ -72,8 +74,9 @@ cases and 20 captured real-model regions against GGML CPU and the official
 StableHLO interpreter. [GGML region acceptance](docs/m4-ggml-region-test-report.md)
 now proves 20 whole-FFN calls in real model inference, identical logits to
 member execution, and safe handling of callbacks, graph reuse and fallback.
-The final deployment gate with compiler entry points physically unavailable
-remains pending.
+The [final deployment gate](docs/m4-deployment-test-report.md) verifies actual
+model inference and all nine FFN profiles in a separate runtime filesystem
+where compiler entry points are physically absent.
 
 ## How it works
 
@@ -620,6 +623,16 @@ commands, raw evidence locations and paired model measurements. Build
 with your retained matmul, pointwise and complete FFN artifact directories.
 Inference invokes no compiler; a clean locked llama.cpp checkout is required.
 
+### AOT deployment without a compiler
+
+The [deployment acceptance report](docs/m4-deployment-test-report.md) shows how
+to prepare an isolated runtime root containing only runners, runtime libraries,
+model data and AOT packages, then verify it in Linux namespaces.
+The test checks actual compiler-launch failures, fresh-process loading,
+mixed matmul/FFN model execution and numerical results. Development compilers
+and caches stay intact. Namespace/chroot setup requires root; all deployed
+programs run as an unprivileged user.
+
 ### Performance measurements
 
 After correctness passes, measure repeated CPU/Coral runs on the same inputs:
@@ -724,7 +737,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes final deployment acceptance, JIT artifact management,
+Future work includes JIT artifact management,
 W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
 will be assigned separately from development milestones.

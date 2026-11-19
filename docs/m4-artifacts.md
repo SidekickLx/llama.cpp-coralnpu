@@ -210,4 +210,5 @@ results. Step 4 is now implemented: the [independent runner](m4-runner.md)
 passes [three-way acceptance](m4-runner-test-report.md) on captured model
 inputs and synthetic cases. Step 5 now provides [GGML complete-region
 execution](m4-ggml-regions.md) and [real-model acceptance](m4-ggml-region-test-report.md).
-The final compiler-unavailable deployment acceptance remains subsequent M4 work.
+The [final compiler-unavailable deployment acceptance](m4-deployment-test-report.md)
+also passed, completing the planned M4 AOT software scope.
