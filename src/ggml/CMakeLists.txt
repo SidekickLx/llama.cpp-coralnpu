@@ -44,6 +44,11 @@ target_compile_options(coral-ffn-cpu-reference PRIVATE -Wall -Wextra -fexception
 set_target_properties(coral-ffn-cpu-reference PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 if(BUILD_TESTING)
+    add_executable(coral-ffn-region-test "${PROJECT_SOURCE_DIR}/tests/ggml/ffn_region_test.cc")
+    target_include_directories(coral-ffn-region-test SYSTEM PRIVATE "${LLAMA_SOURCE_DIR}/ggml/src")
+    target_link_libraries(coral-ffn-region-test PRIVATE ggml-coral)
+    target_compile_options(coral-ffn-region-test PRIVATE -Wall -Wextra -fexceptions)
+    set_target_properties(coral-ffn-region-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     add_executable(coral-ffn-runtime-test "${PROJECT_SOURCE_DIR}/tests/ggml/ffn_runtime_test.cc")
     target_link_libraries(coral-ffn-runtime-test PRIVATE ggml coral_m1_runtime)
     target_compile_options(coral-ffn-runtime-test PRIVATE -Wall -Wextra -fexceptions)

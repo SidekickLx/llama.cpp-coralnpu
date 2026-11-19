@@ -66,7 +66,11 @@ def read_run(directory, mode):
         coral = [node for node in nodes if node["placement"] == "CORAL"]
         cpu = [node for node in nodes if node["placement"] == "CPU"]
         require(len(nodes) == len(cpu) + len(coral), "unknown placement")
-        require(len(coral) == step["coral_nodes"], "Coral node trace mismatch")
+        regions = [item for item in trace if item["kind"] == "ffn_region" and item["step"] == index]
+        covered = sum(len(region["members"]) for region in regions)
+        require(len(coral) + covered == step["coral_nodes"], "Coral node trace mismatch")
+        require(len(regions) == step["stats"].get("ffn_calls", 0), "FFN call trace mismatch")
+        require(covered == step["stats"].get("ffn_members_skipped", 0), "FFN coverage mismatch")
         if summary.get("observation", "nodes") == "nodes":
             require(len(cpu) == step["cpu_nodes"] and len(cpu) > 0,
                     "missing CPU observations")
@@ -81,15 +85,15 @@ def read_run(directory, mode):
         stats = step["stats"]
         for field in ("failures", "failed_dispatches", "observer_errors", "host_executable_load_attempts"):
             require(stats[field] == 0, f"unexpected {field}")
-        require(sum(node["dispatches"] for node in coral) == stats["coral_dispatches"], "dispatch trace mismatch")
-        require(sum(node["instructions"] for node in coral) == stats["kernel_instructions"], "instruction trace mismatch")
+        require(sum(node["dispatches"] for node in coral + regions) == stats["coral_dispatches"], "dispatch trace mismatch")
+        require(sum(node["instructions"] for node in coral + regions) == stats["kernel_instructions"], "instruction trace mismatch")
         if mode == "coral":
             require(len(coral) > 0 and stats["kernel_instructions"] > 0, "no actual NPU execution")
             require(stats["instruction_samples"] == stats["coral_dispatches"], "missing instruction samples")
             matmuls = sum(node["op"] == "MUL_MAT" for node in coral)
             require(stats["matmuls"] == matmuls, "matmul trace mismatch")
             require(stats.get("pointwise_calls", 0) == len(coral) - matmuls, "member trace mismatch")
-            require(len(coral) == stats["calls_completed"], "incomplete Coral calls")
+            require(len(coral) + len(regions) == stats["calls_completed"], "incomplete Coral calls")
             if index >= 2:
                 require(stats["module_loads"] == 0, "warm decode reloaded a module")
                 require(stats["weight_cache_hits"] > 0, "warm decode did not reuse model weights")

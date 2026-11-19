@@ -37,6 +37,7 @@ struct Arguments {
     std::string prompt = "Once upon a time";
     int decode = 3;
     std::string observation = "nodes";
+    std::string ffn = "auto";
 };
 
 void Usage() {
@@ -45,6 +46,7 @@ void Usage() {
         << "  [--prompt TEXT --decode 2|3|4] | [--tokens FILE]\n"
         << "  --artifacts DIRECTORY   Required only in Coral mode (AOT profiles.tsv + VMFBs).\n"
         << "  --observation nodes|backend   Backend mode omits evaluation callbacks.\n"
+        << "  --ffn auto|off   Use optional ffn.tsv regions or retain member execution.\n"
         << "A replay file supplies both prompt and decode input tokens. No compiler is invoked.\n";
 }
 
@@ -73,6 +75,8 @@ Arguments Parse(int argc, char **argv) {
             args.artifacts = value;
         } else if (key == "--observation") {
             args.observation = value;
+        } else if (key == "--ffn") {
+            args.ffn = value;
         } else if (key == "--tokens") {
             args.tokens = value;
         } else if (key == "--prompt") {
@@ -85,6 +89,9 @@ Arguments Parse(int argc, char **argv) {
         } else {
             throw std::invalid_argument("unknown option: " + key);
         }
+    }
+    if (args.ffn != "auto" && args.ffn != "off") {
+        throw std::invalid_argument("--ffn must be auto or off");
     }
     if (args.observation != "nodes" && args.observation != "backend") {
         throw std::invalid_argument("--observation must be nodes or backend");
@@ -179,6 +186,12 @@ void WriteStats(std::ostream &out, const adapter::Stats &after, const adapter::S
         << ",\"ffn_candidates\":" << after.ffn_candidates - before.ffn_candidates
         << ",\"ffn_preparation_plans\":" << after.ffn_preparation_plans - before.ffn_preparation_plans
         << ",\"ffn_rejections\":" << after.ffn_rejections - before.ffn_rejections
+        << ",\"ffn_calls\":" << after.ffn_calls - before.ffn_calls
+        << ",\"ffn_members_skipped\":" << after.ffn_members_skipped - before.ffn_members_skipped
+        << ",\"ffn_missing_artifacts\":" << after.ffn_missing_artifacts - before.ffn_missing_artifacts
+        << ",\"ffn_guard_rejections\":" << after.ffn_guard_rejections - before.ffn_guard_rejections
+        << ",\"ffn_weight_preparations\":" << after.ffn_weight_preparations - before.ffn_weight_preparations
+        << ",\"ffn_weight_cache_hits\":" << after.ffn_weight_cache_hits - before.ffn_weight_cache_hits
         << ",\"matmuls\":" << after.matmuls - before.matmuls
         << ",\"pointwise_calls\":" << after.pointwise_calls - before.pointwise_calls
         << ",\"weight_preparations\":" << after.weight_preparations - before.weight_preparations
@@ -341,6 +354,33 @@ struct Trace {
         }
     }
 
+    static void OnFFN(const adapter::FFNEvent &event, void *user) {
+        auto &trace = *static_cast<Trace *>(user);
+        if (!trace.backend_observation || trace.step < 0 ||
+            !event.dispatches || !event.instructions) {
+            throw std::runtime_error("invalid complete FFN event");
+        }
+        trace.coral_nodes += event.plan.members.size();
+        trace.output << "{\"kind\":\"ffn_region\",\"step\":" << trace.step
+                     << ",\"phase\":" << JsonString(trace.Phase())
+                     << ",\"compute_call\":" << event.compute_call
+                     << ",\"m\":" << event.plan.shape.m << ",\"d\":" << event.plan.shape.d
+                     << ",\"f\":" << event.plan.shape.f
+                     << ",\"program_sha256\":" << JsonString(event.program_sha256)
+                     << ",\"dispatches\":" << event.dispatches
+                     << ",\"instructions\":" << event.instructions
+                     << ",\"invoke_ms\":" << event.invoke_ms
+                     << ",\"weight_cache_hit\":" << (event.weight_cache_hit ? "true" : "false")
+                     << ",\"members\":[";
+        for (std::size_t i = 0; i < event.plan.members.size(); ++i) {
+            if (i) trace.output << ',';
+            const auto *node = event.plan.members[i];
+            trace.output << "{\"name\":" << JsonString(ggml_get_name(node))
+                         << ",\"op\":" << JsonString(ggml_op_name(node->op)) << '}';
+        }
+        trace.output << "]}\n";
+    }
+
     static void OnPlan(const coral::planner::GGMLFFNPlan &plan, void *user) {
         auto &trace = *static_cast<Trace *>(user);
         trace.output << "{\"kind\":\"ffn_plan\",\"step\":" << trace.step
@@ -488,6 +528,8 @@ void Run(const Arguments &args) {
         options.trace = Trace::OnCoral;
         options.trace_user_data = &trace;
         options.plan_trace = Trace::OnPlan;
+        options.ffn_trace = Trace::OnFFN;
+        options.enable_ffn = args.ffn != "off";
         options.evaluation_callbacks = !trace.backend_observation;
         adapter::Register(options);
     }
@@ -600,6 +642,7 @@ void Run(const Arguments &args) {
     auto summary = OpenOutput(args.output / "summary.pending.json");
     summary << "{\"schema\":\"coral-m2-run-v1\",\"status\":\"completed\",\"mode\":"
             << JsonString(args.mode) << ",\"observation\":" << JsonString(args.observation)
+            << ",\"ffn\":" << JsonString(args.ffn)
             << ",\"coral_registered\":" << (coral ? "true" : "false")
             << ",\"registered_devices\":[\"CPU\"" << (coral ? ",\"CORAL\"" : "") << ']'
             << ",\"prefill_tokens\":" << tokens.prefill << ",\"decode_steps\":" << tokens.decode

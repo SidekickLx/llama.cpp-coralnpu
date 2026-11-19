@@ -279,13 +279,24 @@ std::optional<RegionRejection> CheckFFNExecution(
     if (policy.evaluation_callbacks) {
         return Reject(Code::DebugObservation, "evaluation callbacks disable FFN fusion");
     }
+    // Establish that every saved member is in the caller's LIVE graph before
+    // dereferencing it. A retained plan may otherwise point into a freed arena.
+    if (auto error = Uses(execution, plan)) {
+        return error;
+    }
+    // Validate members first. Matching their live source pointers establishes
+    // that each saved boundary input still names a source of this live region.
+    for (auto *member : plan.members) {
+        for (const auto &snapshot : plan.snapshots) {
+            if (snapshot.tensor == member && !SameMetadata(snapshot.metadata, *member)) {
+                return Reject(Code::StaleGraphOrSchedule, "member semantics changed after planning");
+            }
+        }
+    }
     for (const auto &snapshot : plan.snapshots) {
         if (!SameMetadata(snapshot.metadata, *snapshot.tensor)) {
             return Reject(Code::StaleGraphOrSchedule, "source semantics changed after planning");
         }
-    }
-    if (auto error = Uses(execution, plan)) {
-        return error;
     }
     for (std::size_t i = 0; i < plan.members.size(); ++i) {
         if (ggml_node_get_use_count(&execution, Index(execution, plan.members[i])) != plan.uses[i]) {
