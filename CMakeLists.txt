@@ -69,6 +69,7 @@ add_subdirectory(src/artifacts)
 add_library(coral_m1_runtime STATIC src/runtime/matmul_runtime.cc)
 target_include_directories(coral_m1_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(coral_m1_runtime PRIVATE
+    coral_ffn_artifact
     iree::async
     iree::async::util::proactor_pool
     iree::base

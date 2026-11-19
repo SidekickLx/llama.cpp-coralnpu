@@ -79,6 +79,7 @@ class DeviceContext {
     friend class PreparedWeight;
     friend class LoadedModule;
     friend class PointwiseModule;
+    friend class FFNModule;
 };
 
 // An immutable, owning snapshot of W[N,K]. No shape-only weight cache.
@@ -95,6 +96,7 @@ class PreparedWeight {
   private:
     std::unique_ptr<detail::WeightState> state_;
     friend class LoadedModule;
+    friend class FFNModule;
 };
 
 // One VM context and loaded module, reused across all Run() calls.

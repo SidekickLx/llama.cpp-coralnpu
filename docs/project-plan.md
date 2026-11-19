@@ -261,6 +261,14 @@ GGML 的 graph_optimize 在 scheduler 切分后运行，不能自然跨过分给
 
 M0/M1 已经完成单算子 AOT。本阶段把它推广为可独立发布、重载和验证的 FFN artifact。
 
+当前实施状态（2026-11-18）：M4 实施顺序的前三步已完成：artifact 契约、
+完整 FFN AOT 编译入口、独立 FFN runtime。六组静态 profile 已编译并在 MPACT
+执行，与 GGML CPU 的 86 次数值对照通过。这里的“前三步”指本轮实施拆分，
+并非下方长期任务清单的序号。完整 region 尚未接入 GGML backend；
+三方独立 runner 和 compiler 不可用环境的最终验收仍待后续完成。
+见 [M4 artifact/runtime guide](m4-artifacts.md) 与 [测试报告](m4-step1-3-report.md)。
+
+
 **任务**
 
 1. 接收 M3 已验证的 StableHLO module 和 FFN compile spec，调用同一 Coral IREE compiler；不再增加一层自定义计算 IR 转换。

@@ -3,7 +3,7 @@
 ## Step 1: artifact contract
 
 Status: contract and loader validation implemented. A valid manifest is not
-proof that bytes are executable; VM reflection and execution are later gates.
+proof that bytes are executable; step 3 separately checks VM reflection and execution.
 
 The wire format is [ffn-manifest.schema.json](../artifacts/ffn-manifest.schema.json).
 The C++ validator additionally enforces role order, exact shape relations,
@@ -75,7 +75,9 @@ argument roles, dot properties, constants, types and numeric policy. Valid IR
 with incorrect FFN semantics is rejected. No custom dialect or numerical
 interpreter is introduced.
 
-After admission, diagnostic graph/tensor IDs move into source metadata.
+After admission, operation diagnostic IDs are written to source metadata;
+the original input (including graph and argument metadata) is retained as
+source.mlir. Diagnostic metadata is removed from semantic IR.
 Independent operation order and accepted commutative spellings are normalized.
 The actual imported operations are compiled, not replaced by a shape template.
 The semantic digest excludes runtime values, source identities and locations.
@@ -131,3 +133,79 @@ All six profiles contain zero host numerical dispatches. These are compilation
 results; runtime correctness and actual MPACT execution are a separate gate.
 The updated artifact validator also passes the 54 contract negative cases;
 evidence: `build/m4-contract-results/contract-9m6spbnx/report.json`.
+
+## Step 3: independent FFN runtime
+
+Status: implemented. The public API is
+[`src/runtime/ffn_runtime.h`](../src/runtime/ffn_runtime.h).
+`FFNModule` and `PreparedFFNWeights` reuse the existing VM/HAL ownership,
+Coral MPACT device, rejecting host executable loader, dispatch observer and
+output checks. The runtime links neither GGML nor MLIR/compiler libraries;
+GGML is linked only into the numerical test executable.
+
+The module validates the package before loading its owned bytecode snapshot.
+Actual VM function reflection and the synchronous four-reference calling
+convention must match before context initialization. A call binds
+`X[M,D], W_gate[F,D], W_up[F,D], W_down[D,F]` and returns an owned `Y[M,D]`.
+
+Example, assuming the vectors already contain dense F32 tensors:
+
+~~~cpp
+#include "runtime/ffn_runtime.h"
+
+coral::contracts::FFNCompileSpec spec;
+spec.shape = {1, 64, 172};
+
+coral::runtime::DeviceContext device;
+coral::runtime::FFNModule module(device, artifact_directory, spec);
+coral::runtime::PreparedFFNWeights weights(
+    device,
+    spec,
+    coral::runtime::TensorBinding::Dense(gate_values, 172, 64),
+    coral::runtime::TensorBinding::Dense(up_values, 172, 64),
+    coral::runtime::TensorBinding::Dense(down_values, 64, 172));
+
+auto output = module.Run(
+    coral::runtime::TensorBinding::Dense(input_values, 1, 64),
+    weights);
+~~~
+
+All three weight bindings are validated before any upload. Preparation creates
+immutable snapshots, with no cache keyed only by shape. The original vectors
+can change or die after preparation. Snapshots can serve different M profiles
+with matching D/F on the same device; modules still require an exact M match.
+Activation buffers are reused but their contents are uploaded on every call.
+
+Modules and weights retain the device after the `DeviceContext` wrapper dies.
+Moved-from objects, wrong shapes, wrong strides, missing values and foreign
+device weights are rejected before invocation. Calls are synchronous and
+objects are confined to one host thread.
+
+A result is returned only after successful VM execution, complete Coral
+instruction evidence, output shape/type/size checks and readback. Execution
+failure returns no partial result and makes the shared context unusable;
+there is no implicit CPU replay. Artifact/ABI rejection before VM context
+initialization leaves the device available for loading a valid module.
+
+After the README's M2 build setup:
+
+~~~bash
+source env.sh
+cmake --build build/m1 --target coral-ffn-runtime-test -j4
+python tests/runtime/verify_ffn.py \
+  --artifacts build/m4-aot-results/aot-cvoknmn_
+
+# Inspect one already-compiled real-model shape directly:
+build/m1/coral-ffn-runtime-test run \
+  build/m4-aot-results/aot-cvoknmn_/real-decode 1 64 172
+~~~
+
+Use the evidence directory produced by your own AOT verification run on another
+machine. `verify_ffn.py` preserves artifacts/logs and uses generated finite test
+values with GGML CPU as its numerical reference. Its fault-injection cases
+intentionally bypass production semantic admission to test VM/output rejection.
+
+See the [steps 1–3 test report](m4-step1-3-report.md) for all results and timing
+definitions. A general standalone artifact runner with captured real-model
+inputs and a CPU/StableHLO/Coral comparison, GGML complete-region routing, and
+the final compiler-unavailable acceptance remain subsequent M4 work.
