@@ -12,7 +12,8 @@ matrix multiplications and selected pointwise operations to MPACT through IREE.
 **Status: unreleased research prototype.** M1 (standalone runtime), M2
 (GGML integration and a small model), and M3 (F32 FFN import, reference semantics
 and placement legality) have passed their scoped functional acceptance tests.
-M4 steps 1–3 now provide [complete FFN AOT artifacts and an independent runtime](docs/m4-artifacts.md).
+M4 steps 1–4 provide [complete FFN AOT artifacts and an independent runtime](docs/m4-artifacts.md),
+plus a [standalone runner with three-way numerical acceptance](docs/m4-runner.md).
 Full M4 acceptance is still pending. These are development milestones. The first `v0.1.0` release
 is reserved for SoC integration; completing M2 does not constitute that release.
 
@@ -61,11 +62,11 @@ against GGML CPU. Fusion checks cover external consumers, views, callbacks,
 graph reuse and input lifetime through unmodified upstream interfaces.
 [Standalone member execution and real FFN placement](docs/m3-pointwise.md)
 are verified: complete FFN members can share a Coral compute range.
-The GGML path still executes them as separate programs. M4 steps 1–3 additionally
-compile and execute a complete FFN VMFB through an independent C++ interface.
-See the [artifact/runtime guide](docs/m4-artifacts.md) and
-[test report](docs/m4-step1-3-report.md). Full CPU/StableHLO/Coral comparison
-and complete-region GGML routing remain pending.
+The GGML path still executes them as separate programs. M4 independently
+compiles and executes complete FFN VMFBs through a C++ interface and CLI.
+The [runner acceptance](docs/m4-runner-test-report.md) covers 14 synthetic
+cases and 20 captured real-model regions against GGML CPU and the official
+StableHLO interpreter. Complete-region GGML routing remains pending.
 
 ## How it works
 
@@ -587,6 +588,15 @@ artifacts and logs, and writes a new report under `build/m3-acceptance-results/`
 See the [M3 acceptance report](docs/m3-ffn-acceptance.md) for exact coverage,
 numerical results, diagnostic timing and the M4 boundary.
 
+### Independent complete FFN runner
+
+Build `coral-ffn-runner` and `coral-ffn-cpu-reference` using the existing M2
+configuration. The [runner guide](docs/m4-runner.md) explains tensor inputs,
+batch execution, safe result publication and the three-way verifier.
+The [recorded report](docs/m4-runner-test-report.md) includes a command for
+replaying a captured real-model FFN, all nine profiles, numerical errors,
+fresh-process reload evidence and simulator timings.
+
 ### Performance measurements
 
 After correctness passes, measure repeated CPU/Coral runs on the same inputs:
@@ -615,7 +625,8 @@ traffic or peak device memory.
 | [`src/runtime/`](src/runtime/) | Shared VM/HAL runtime, matmul/pointwise execution, complete FFN modules and weight snapshots |
 | [`src/artifacts/`](src/artifacts/) | FFN package integrity, compatibility and ABI validation without compiler dependencies |
 | [`src/ggml/`](src/ggml/) | Backend capability/routing logic, artifact and weight-cache integration, model runner |
-| [`src/support/`](src/support/) | Shared JSON output helpers |
+| [`src/support/`](src/support/) | Shared JSON helpers and bounded FFN tensor input/output |
+| [`src/validation/`](src/validation/) | Separate GGML CPU FFN oracle for numerical acceptance |
 | [`src/contracts/`](src/contracts/) | FFN ABI, shapes, numerical policy, tensor roles and artifact contract |
 | [`src/planner/`](src/planner/) | M3 FFN recognition, capability/legality checks, allocation dependencies and live guards |
 | [`compiler/export_matmul.py`](compiler/export_matmul.py) | Export static F32 matmul shapes to StableHLO text |
@@ -690,8 +701,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes the complete FFN three-way acceptance runner,
-GGML region execution, JIT artifact management,
+Future work includes GGML complete-region execution, final deployment
+acceptance, JIT artifact management,
 W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
 will be assigned separately from development milestones.

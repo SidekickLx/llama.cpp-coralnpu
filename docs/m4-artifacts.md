@@ -205,7 +205,8 @@ machine. `verify_ffn.py` preserves artifacts/logs and uses generated finite test
 values with GGML CPU as its numerical reference. Its fault-injection cases
 intentionally bypass production semantic admission to test VM/output rejection.
 
-See the [steps 1–3 test report](m4-step1-3-report.md) for all results and timing
-definitions. A general standalone artifact runner with captured real-model
-inputs and a CPU/StableHLO/Coral comparison, GGML complete-region routing, and
-the final compiler-unavailable acceptance remain subsequent M4 work.
+See the [steps 1–3 test report](m4-step1-3-report.md) for runtime boundary
+results. Step 4 is now implemented: the [independent runner](m4-runner.md)
+passes [three-way acceptance](m4-runner-test-report.md) on captured model
+inputs and synthetic cases. GGML complete-region routing and the final
+compiler-unavailable deployment acceptance remain subsequent M4 work.

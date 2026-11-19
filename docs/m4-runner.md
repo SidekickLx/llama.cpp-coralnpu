@@ -5,6 +5,9 @@ tensors on Coral MPACT. `coral-ffn-cpu-reference` evaluates the same positional
 FFN through upstream GGML CPU in a separate process. The official
 `coral-stablehlo-reference` remains the StableHLO numerical oracle.
 
+Acceptance: all 34 synthetic/real-model cases pass across nine profiles.
+See the [test report](m4-runner-test-report.md) for execution evidence and timing.
+
 ## Build and run
 
 After the README build setup:
@@ -109,4 +112,41 @@ changed activation/weights, repeated calls, malformed tensors, CLI limits,
 existing-output preservation and input/output aliasing.
 Evidence: `build/m4-runner-cli-results/cli-h2wa2d9z/report.json`.
 
-Full real-model and synthetic CPU/StableHLO/Coral acceptance is the next gate.
+## Three-way validation
+
+The acceptance tool consumes passing M3 synthetic and model capture directories
+and the M4 AOT evidence directory. It reuses existing packages and prepares only
+missing exact profiles in a new evidence directory. Compiler use is confined
+to this preparation phase.
+
+~~~bash
+python tests/runtime/verify_ffn_runner.py \
+  --fixtures PATH_TO_M3_SYNTHETIC_FFN_EVIDENCE \
+  --real-fixtures PATH_TO_M3_MODEL_FFN_EVIDENCE \
+  --artifacts PATH_TO_M4_AOT_EVIDENCE
+~~~
+
+For each captured case, the verifier:
+
+1. Snapshots the four tensor inputs, captured GGML output and imported module.
+2. Normalizes the captured computation and requires its semantic hash to match
+   the artifact. Numerical interpretation uses the artifact's actual StableHLO.
+3. Recomputes GGML CPU output, executes Coral in batches with independent
+   weights, and reloads the package in another process.
+4. Runs the official StableHLO interpreter on the same input bytes.
+5. Compares all three engine pairs, and fresh GGML output against its original
+   captured result, with fixed `atol=1e-4, rtol=1e-4`.
+6. Swaps same-shaped real gate/up weights as a negative control: the engines
+   must agree on the changed inputs, while the original captured expectation
+   must reveal the binding mistake.
+
+Per-case input/program hashes, all three outputs, maximum errors, failure
+indices, timing and raw logs are retained. A numerical mismatch produces a
+failed aggregate report and nonzero exit. No tolerance is adjusted by the tool.
+The main Coral/CPU timing phase finishes before the slower reference phase.
+Large reference profiles can take several minutes.
+
+Coverage is all fourteen positive synthetic imports and all twenty captured
+model regions (five layers across prefill and three decode steps). The real
+capture includes four M=5 prefill regions and one M=1 last-layer prefill region,
+plus fifteen M=1 decode regions.

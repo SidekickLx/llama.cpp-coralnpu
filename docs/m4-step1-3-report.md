@@ -2,7 +2,8 @@
 
 Date: 2026-11-18. Scope: artifact contract, complete FFN AOT compiler entry,
 and independent FFN runtime. These three implementation milestones pass.
-This is not acceptance of all M4 work.
+This is not acceptance of all M4 work. Subsequent independent runner results
+are recorded in the [step 4 report](m4-runner-test-report.md).
 
 ## Implementation and evidence
 
