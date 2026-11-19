@@ -64,6 +64,8 @@ include_directories(
 add_subdirectory("${CORALNPU_SOURCE_DIR}/third_party/iree"
                  "${CMAKE_BINARY_DIR}/iree" EXCLUDE_FROM_ALL)
 
+add_subdirectory(src/artifacts)
+
 add_library(coral_m1_runtime STATIC src/runtime/matmul_runtime.cc)
 target_include_directories(coral_m1_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(coral_m1_runtime PRIVATE

@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "state",
+    "contract",
+    "compatibility",
+    "program",
+    "compiler",
+    "files",
+    "placement",
+    "reflection"
+  ],
+  "properties": {
+    "schema": {
+      "const": "coral.ffn.artifact.v1"
+    },
+    "state": {
+      "const": "complete"
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "abi",
+        "entry",
+        "numeric_policy",
+        "shape",
+        "inputs",
+        "output"
+      ],
+      "properties": {
+        "abi": {
+          "const": "coral.ffn.f32.v1"
+        },
+        "entry": {
+          "const": "ffn"
+        },
+        "numeric_policy": {
+          "const": "f32-no-fast-math-v1"
+        },
+        "shape": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "m",
+            "d",
+            "f"
+          ],
+          "properties": {
+            "m": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 536870911
+            },
+            "d": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 536870911
+            },
+            "f": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 536870911
+            }
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "dtype",
+              "layout",
+              "shape"
+            ],
+            "properties": {
+              "role": {
+                "enum": [
+                  "activation",
+                  "gate_weight",
+                  "up_weight",
+                  "down_weight",
+                  "output"
+                ]
+              },
+              "dtype": {
+                "const": "f32"
+              },
+              "layout": {
+                "const": "row-major"
+              },
+              "shape": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 536870911
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "role",
+            "dtype",
+            "layout",
+            "shape"
+          ],
+          "properties": {
+            "role": {
+              "enum": [
+                "activation",
+                "gate_weight",
+                "up_weight",
+                "down_weight",
+                "output"
+              ]
+            },
+            "dtype": {
+              "const": "f32"
+            },
+            "layout": {
+              "const": "row-major"
+            },
+            "shape": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 536870911
+              },
+              "minItems": 2,
+              "maxItems": 2
+            }
+          }
+        }
+      }
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "simulator",
+        "dependency_lock_sha256",
+        "repositories",
+        "patches",
+        "runtime_sources",
+        "target"
+      ],
+      "properties": {
+        "host": {
+          "const": "linux-x86_64"
+        },
+        "simulator": {
+          "const": "mpact"
+        },
+        "dependency_lock_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "repositories": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "url",
+              "revision"
+            ],
+            "properties": {
+              "url": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}$"
+              }
+            }
+          }
+        },
+        "patches": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "runtime_sources": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "triple",
+            "abi",
+            "features",
+            "itcm_bytes",
+            "dtcm_bytes",
+            "highmem",
+            "stack_bytes",
+            "dtcm_reserve_bytes"
+          ],
+          "properties": {
+            "triple": {
+              "const": "riscv32-unknown-elf"
+            },
+            "abi": {
+              "const": "ilp32"
+            },
+            "features": {
+              "type": "string",
+              "minLength": 1
+            },
+            "itcm_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 536870911
+            },
+            "dtcm_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 536870911
+            },
+            "highmem": {
+              "const": false
+            },
+            "stack_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 536870911
+            },
+            "dtcm_reserve_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 536870911
+            }
+          }
+        }
+      }
+    },
+    "program": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pipeline",
+        "semantic_sha256"
+      ],
+      "properties": {
+        "pipeline": {
+          "const": "coral.ffn.aot.f32.v1"
+        },
+        "semantic_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "compiler": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binary_sha256",
+        "support_sha256",
+        "options"
+      ],
+      "properties": {
+        "binary_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "support_sha256": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "linker",
+            "linker_script",
+            "iree_archive",
+            "crt_archive"
+          ],
+          "properties": {
+            "linker": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "linker_script": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "iree_archive": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "crt_archive": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "region.vmfb",
+        "region.stablehlo.mlir",
+        "region.metadata.json",
+        "placement.json"
+      ],
+      "properties": {
+        "region.vmfb": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "region.stablehlo.mlir": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "region.metadata.json": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "placement.json": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "numerical_target",
+        "host_dispatches",
+        "coral_dispatches"
+      ],
+      "properties": {
+        "numerical_target": {
+          "const": "coralnpu"
+        },
+        "host_dispatches": {
+          "const": 0
+        },
+        "coral_dispatches": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        }
+      }
+    },
+    "reflection": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
