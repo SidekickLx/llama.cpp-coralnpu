@@ -37,6 +37,12 @@ target_link_libraries(coral-llama-runner PRIVATE ggml-coral llama)
 target_compile_options(coral-llama-runner PRIVATE -Wall -Wextra -fexceptions)
 set_target_properties(coral-llama-runner PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
+# An optional, separate CPU oracle; the Coral runner does not link GGML.
+add_executable(coral-ffn-cpu-reference "../validation/ffn_cpu_reference.cc")
+target_link_libraries(coral-ffn-cpu-reference PRIVATE ggml coral_ffn_io)
+target_compile_options(coral-ffn-cpu-reference PRIVATE -Wall -Wextra -fexceptions)
+set_target_properties(coral-ffn-cpu-reference PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+
 if(BUILD_TESTING)
     add_executable(coral-ffn-runtime-test "${PROJECT_SOURCE_DIR}/tests/ggml/ffn_runtime_test.cc")
     target_link_libraries(coral-ffn-runtime-test PRIVATE ggml coral_m1_runtime)

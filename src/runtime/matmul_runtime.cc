@@ -404,6 +404,7 @@ struct ModuleState {
     MatmulShape shape;
     contracts::PointwiseSpec pointwise;
     contracts::FFNCompileSpec ffn;
+    std::string program_sha256;
     std::vector<BufferView> arguments;
     std::size_t output_rows = 0, output_cols = 0;
     void Initialize(const std::string &path, const std::string &entry,
@@ -714,6 +715,7 @@ FFNModule::FFNModule(const DeviceContext &device, const std::string &directory,
     state_->device->RequireHealthy();
     auto artifact = artifacts::LoadFFNArtifact(directory, spec);
     state_->ffn = spec;
+    state_->program_sha256 = artifact.program_sha256;
     state_->output_rows = spec.shape.m;
     state_->output_cols = spec.shape.d;
     // Initialize compares actual VM function reflection and the four-reference
@@ -722,6 +724,10 @@ FFNModule::FFNModule(const DeviceContext &device, const std::string &directory,
                        artifact.reflection, 4, std::move(artifact.bytecode));
 }
 FFNModule::~FFNModule() = default;
+std::string FFNModule::program_sha256() const {
+    if (!state_) throw std::invalid_argument("cannot inspect a moved-from FFN module");
+    return state_->program_sha256;
+}
 FFNModule::FFNModule(FFNModule &&) noexcept = default;
 FFNModule &FFNModule::operator=(FFNModule &&) noexcept = default;
 

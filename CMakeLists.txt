@@ -85,6 +85,15 @@ target_link_libraries(coral_m1_runtime PRIVATE
     coralnpu_metrics_runtime::stats_collector
 )
 
+# Shared diagnostic tensor I/O, separate from the reusable VM/HAL runtime.
+add_library(coral_ffn_io STATIC src/support/ffn_io.cc)
+target_link_libraries(coral_ffn_io PUBLIC coral_ffn_artifact)
+target_include_directories(coral_ffn_io SYSTEM PUBLIC "${PROJECT_SOURCE_DIR}/repos/llama.cpp/vendor")
+target_compile_options(coral_ffn_io PRIVATE -Wall -Wextra -fexceptions)
+add_executable(coral-ffn-runner src/runtime/ffn_runner.cc)
+target_link_libraries(coral-ffn-runner PRIVATE coral_m1_runtime coral_ffn_io)
+target_compile_options(coral-ffn-runner PRIVATE -Wall -Wextra -fexceptions)
+
 add_executable(coral-matmul-runner src/runtime/matmul_runner.cc)
 target_link_libraries(coral-matmul-runner PRIVATE coral_m1_runtime)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")

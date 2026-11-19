@@ -36,6 +36,8 @@ class FFNModule {
     FFNModule(const DeviceContext &, const std::string &artifact_directory,
               const contracts::FFNCompileSpec &);
     ~FFNModule();
+    // Semantic identity of the artifact actually loaded into this module.
+    std::string program_sha256() const;
     FFNModule(FFNModule &&) noexcept;
     FFNModule &operator=(FFNModule &&) noexcept;
     FFNModule(const FFNModule &) = delete;
