@@ -3,6 +3,10 @@
 #include "planner/ggml_fusion.h"
 #include "ggml-backend-impl.h"
 #include "ggml-cpu.h"
+#include "ggml-impl.h"
+#include "runtime/ffn_runtime.h"
+#include <algorithm>
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -23,12 +27,14 @@ using runtime::RuntimeStats;
 using runtime::TensorBinding;
 using ShapeKey = std::tuple<std::size_t, std::size_t, std::size_t>;
 using PointwiseKey = std::tuple<contracts::PointwiseKind, std::size_t, std::size_t>;
+using FFNKey = std::tuple<std::int64_t, std::int64_t, std::int64_t>;
 using WeightKey = std::tuple<std::uintptr_t, std::uintptr_t, std::size_t, std::size_t>;
 
 struct Registration {
     Options options;
     std::map<ShapeKey, std::string> artifacts;
     std::map<PointwiseKey, std::string> pointwise_artifacts;
+    std::map<FFNKey, std::string> ffn_artifacts;
     Stats stats;
     std::string error;
     bool registered = false;
@@ -38,6 +44,8 @@ struct Registration {
 Registration registration;
 
 PointwiseKey Key(contracts::PointwiseSpec spec) { return {spec.kind, spec.rows, spec.cols}; }
+
+FFNKey Key(contracts::FFNShape shape) { return {shape.m, shape.d, shape.f}; }
 
 ShapeKey Key(MatmulShape shape) { return {shape.m, shape.k, shape.n}; }
 
@@ -99,13 +107,125 @@ void RecordError(const char *message) noexcept {
     }
 }
 
+// The pinned scheduler optimizes all split objects before allocation, then
+// assigns each a fresh nonzero UID. Evaluation callback views have UID zero.
+// Store opaque identities, never a reference to the split or its node array.
+struct PlannedSplit {
+    std::vector<const ggml_tensor *> nodes;
+    const void *use_counts = nullptr;
+    std::uint64_t uid = 0;
+    std::vector<planner::GGMLFFNPlan> regions;
+
+    bool Matches(const ggml_cgraph &graph) {
+        if (!graph.uid || (uid && uid != graph.uid) || use_counts != graph.use_counts ||
+            nodes.size() != static_cast<std::size_t>(graph.n_nodes)) {
+            return false;
+        }
+        for (int i = 0; i < graph.n_nodes; ++i) {
+            if (nodes[i] != graph.nodes[i]) {
+                return false;
+            }
+        }
+        uid = graph.uid;
+        return true;
+    }
+};
+
 struct BackendContext {
     DeviceContext device;
     std::map<ShapeKey, std::unique_ptr<LoadedModule>> modules;
     std::map<WeightKey, std::unique_ptr<PreparedWeight>> weights;
     std::map<PointwiseKey, std::unique_ptr<runtime::PointwiseModule>> pointwise_modules;
+    std::map<FFNKey, std::unique_ptr<runtime::FFNModule>> ffn_modules;
+    // Include ordered roles, tensor identity, buffer and data identity and shape.
+    // Same-shaped layers must not share snapshots accidentally.
+    using FFNWeightKey = std::array<std::uintptr_t, 11>;
+    std::map<FFNWeightKey, std::unique_ptr<runtime::PreparedFFNWeights>> ffn_weights;
+    std::map<const ggml_cgraph *, PlannedSplit> planned_splits;
+    const void *planning_parent = nullptr;
+    bool executed_since_optimization = false;
     bool failed = false;
     std::uint64_t optimization_generation = 0;
+
+    void ComputeFFN(const planner::GGMLFFNPlan &plan) {
+        contracts::FFNCompileSpec spec;
+        spec.shape = plan.shape;
+        contracts::ValidateFFNSpec(spec);
+        for (auto *input : plan.inputs) {
+            if (!HostStorage(input)) {
+                throw std::runtime_error("FFN input must have host-visible storage");
+            }
+        }
+        auto *destination = plan.members.back();
+        if (!HostStorage(destination)) {
+            throw std::runtime_error("FFN output must have host-visible storage");
+        }
+        const auto key = Key(plan.shape);
+        auto module = ffn_modules.find(key);
+        if (module == ffn_modules.end()) {
+            // A listed but corrupt/incompatible package is an error. Do not
+            // conceal deployment failures by replaying its original members.
+            auto loaded = std::make_unique<runtime::FFNModule>(
+                device, registration.ffn_artifacts.at(key), spec);
+            module = ffn_modules.emplace(key, std::move(loaded)).first;
+        }
+        std::array<TensorBinding, 4> bindings;
+        FFNWeightKey weight_key{};
+        weight_key[9] = plan.shape.d;
+        weight_key[10] = plan.shape.f;
+        bool cacheable = registration.options.immutable_model_weights;
+        for (std::size_t i = 0; i < plan.inputs.size(); ++i) {
+            auto *tensor = plan.inputs[i];
+            bindings[i] = {static_cast<const float *>(tensor->data),
+                           static_cast<std::size_t>(ggml_nelements(tensor)),
+                           static_cast<std::size_t>(tensor->ne[1]),
+                           static_cast<std::size_t>(tensor->ne[0]), tensor->nb[1]};
+            if (i) {
+                const auto base = (i - 1) * 3;
+                weight_key[base] = reinterpret_cast<std::uintptr_t>(tensor);
+                weight_key[base + 1] = reinterpret_cast<std::uintptr_t>(Buffer(tensor));
+                weight_key[base + 2] = reinterpret_cast<std::uintptr_t>(tensor->data);
+                cacheable = cacheable && tensor->op == GGML_OP_NONE && !tensor->view_src &&
+                    ggml_backend_buffer_get_usage(Buffer(tensor)) == GGML_BACKEND_BUFFER_USAGE_WEIGHTS;
+            }
+        }
+        std::unique_ptr<runtime::PreparedFFNWeights> temporary;
+        runtime::PreparedFFNWeights *prepared = nullptr;
+        bool cache_hit = false;
+        if (cacheable) {
+            auto entry = ffn_weights.find(weight_key);
+            cache_hit = entry != ffn_weights.end();
+            if (!cache_hit) {
+                auto value = std::make_unique<runtime::PreparedFFNWeights>(
+                    device, spec, bindings[1], bindings[2], bindings[3]);
+                entry = ffn_weights.emplace(weight_key, std::move(value)).first;
+                ++registration.stats.ffn_weight_preparations;
+            } else {
+                ++registration.stats.ffn_weight_cache_hits;
+            }
+            prepared = entry->second.get();
+        } else {
+            temporary = std::make_unique<runtime::PreparedFFNWeights>(
+                device, spec, bindings[1], bindings[2], bindings[3]);
+            prepared = temporary.get();
+            ++registration.stats.ffn_weight_preparations;
+        }
+        const auto before = device.stats();
+        const auto output = module->second->Run(bindings[0], *prepared);
+        // Execution occurs at the first member; the contiguous region has no
+        // observable intermediates. Publish Y only after the whole call passes.
+        std::memcpy(destination->data, output.data(), output.size() * sizeof(float));
+        ++registration.stats.ffn_calls;
+        registration.stats.ffn_members_skipped += plan.members.size();
+        if (registration.options.ffn_trace) {
+            const auto after = device.stats();
+            const FFNEvent event{plan, module->second->program_sha256(),
+                after.coral_dispatches - before.coral_dispatches,
+                after.kernel_instructions - before.kernel_instructions, cache_hit,
+                registration.stats.graph_calls, after.invoke_ms - before.invoke_ms};
+            registration.options.ffn_trace(event, registration.options.trace_user_data);
+        }
+    }
 
     void ComputePointwise(ggml_tensor *node, contracts::PointwiseSpec spec) {
         if (!HostStorage(node)) {
@@ -230,6 +350,7 @@ ggml_status GraphCompute(ggml_backend_t backend, ggml_cgraph *graph) {
     auto &context = *static_cast<BackendContext *>(backend->context);
     const auto before = context.device.stats();
     ++registration.stats.graph_calls;
+    context.executed_since_optimization = true;
     try {
         if (context.failed) {
             throw std::runtime_error("Coral backend is unusable after a graph failure");
@@ -244,8 +365,29 @@ ggml_status GraphCompute(ggml_backend_t backend, ggml_cgraph *graph) {
                 throw std::runtime_error("Coral graph contains an unsupported operation");
             }
         }
+        std::map<const ggml_tensor *, const planner::GGMLFFNPlan *> regions;
+        const auto split = context.planned_splits.find(graph);
+        if (split != context.planned_splits.end() && split->second.Matches(*graph)) {
+            for (const auto &plan : split->second.regions) {
+                regions.emplace(plan.members.front(), &plan);
+            }
+        }
         for (int i = 0; i < ggml_graph_n_nodes(graph); ++i) {
             auto *node = ggml_graph_node(graph, i);
+            const auto region = regions.find(node);
+            if (region != regions.end()) {
+                const auto &plan = *region->second;
+                const planner::FFNPolicy policy{context.optimization_generation,
+                    registration.options.evaluation_callbacks, QueryFFNMember, nullptr};
+                // Recheck immediately before EVERY call, including graph reuse.
+                // A failed live guard retains the original member path.
+                if (!planner::CheckFFNExecution(plan, *graph, policy)) {
+                    context.ComputeFFN(plan);
+                    i += static_cast<int>(plan.members.size()) - 1;
+                    continue;
+                }
+                ++registration.stats.ffn_guard_rejections;
+            }
             if ((node->flags & GGML_TENSOR_FLAG_COMPUTE) && !NoCompute(node->op)) {
                 context.Compute(node);
             }
@@ -284,8 +426,25 @@ void GraphOptimize(ggml_backend_t backend, ggml_cgraph *graph,
         if (context.failed) {
             return;
         }
+        // A backend serves one scheduler at a time. A new optimization batch
+        // replaces all prior borrowed identities; multiple splits of the same
+        // parent graph share one generation. Reservation never loads a module.
+        const void *parent = graph->visited_hash_set.keys;
+        if (context.executed_since_optimization || context.planning_parent != parent) {
+            context.planned_splits.clear();
+            ++context.optimization_generation;
+            context.planning_parent = parent;
+        }
+        context.executed_since_optimization = false;
+        if (!context.optimization_generation) {
+            ++context.optimization_generation;
+        }
+        auto &split = context.planned_splits[graph];
+        split = {};
+        split.use_counts = graph->use_counts;
+        split.nodes.assign(graph->nodes, graph->nodes + graph->n_nodes);
         const planner::FFNPolicy policy{
-            ++context.optimization_generation, registration.options.evaluation_callbacks,
+            context.optimization_generation, registration.options.evaluation_callbacks,
             QueryFFNMember, nullptr};
         for (int i = 0; i < ggml_graph_n_nodes(graph); ++i) {
             auto result = planner::PlanFFN(*graph, i, policy, allocation);
@@ -297,15 +456,22 @@ void GraphOptimize(ggml_backend_t backend, ggml_cgraph *graph,
                 ++registration.stats.ffn_rejections;
             } else {
                 ++registration.stats.ffn_preparation_plans;
+                const auto &plan = std::get<planner::GGMLFFNPlan>(result);
+                if (registration.options.enable_ffn) {
+                    if (registration.ffn_artifacts.count(Key(plan.shape))) {
+                        split.regions.push_back(plan);
+                    } else {
+                        ++registration.stats.ffn_missing_artifacts;
+                    }
+                }
                 if (registration.options.plan_trace) {
                     registration.options.plan_trace(std::get<planner::GGMLFFNPlan>(result),
                                                     registration.options.trace_user_data);
                 }
             }
         }
-        // Admission only. The current backend has no full-FFN executable.
-        // Keep every original node; M4 must prepare and revalidate before
-        // skipping members or invoking a fused program.
+        // Leave the graph unchanged. Actual execution binds the split UID and
+        // validates live metadata/ranges before bypassing any member kernel.
     } catch (const std::exception &error) {
         context.failed = true;
         RecordError(error.what());
@@ -465,6 +631,42 @@ std::map<PointwiseKey, std::string> ReadPointwiseArtifacts(const std::string &di
     }
     return result;
 }
+std::map<FFNKey, std::string> ReadFFNArtifacts(const std::string &directory) {
+    const auto root = std::filesystem::canonical(directory);
+    std::map<FFNKey, std::string> result;
+    if (!std::filesystem::exists(root / "ffn.tsv")) {
+        return result;
+    }
+    std::ifstream input(root / "ffn.tsv");
+    std::string line;
+    if (!std::getline(input, line) || line != "coral-m4-ffn-v1") {
+        throw std::runtime_error("invalid FFN catalog header");
+    }
+    while (std::getline(input, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        contracts::FFNCompileSpec spec;
+        std::string dirname, extra;
+        std::istringstream fields(line);
+        if (!(fields >> spec.shape.m >> spec.shape.d >> spec.shape.f >> dirname) || fields >> extra) {
+            throw std::runtime_error("invalid FFN catalog row");
+        }
+        contracts::ValidateFFNSpec(spec);
+        const std::filesystem::path path(dirname);
+        if (path.filename() != path || path == "." || path == ".." ||
+            std::filesystem::is_symlink(root / path) || !std::filesystem::is_directory(root / path)) {
+            throw std::runtime_error("FFN profile must name a local package directory");
+        }
+        if (!result.emplace(Key(spec.shape), (root / path).string()).second) {
+            throw std::runtime_error("duplicate FFN profile");
+        }
+    }
+    if (result.empty() || !input.eof()) {
+        throw std::runtime_error("empty or unreadable FFN catalog");
+    }
+    return result;
+}
 } // namespace
 
 bool Compatible(const ggml_tensor *op, MatmulShape *shape) noexcept {
@@ -544,9 +746,11 @@ void Register(const Options &options) {
     }
     auto artifacts = ReadArtifacts(options.artifact_directory);
     auto pointwise = ReadPointwiseArtifacts(options.artifact_directory);
+    auto ffn = ReadFFNArtifacts(options.artifact_directory);
     registration.options = options;
     registration.artifacts = std::move(artifacts);
     registration.pointwise_artifacts = std::move(pointwise);
+    registration.ffn_artifacts = std::move(ffn);
     auto &device = registration.device;
     device.reg = &registration.reg;
     device.iface.get_name = DeviceName;

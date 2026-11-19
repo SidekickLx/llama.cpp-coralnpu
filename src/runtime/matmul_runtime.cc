@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "matmul_runtime.h"
+#include "ffn_runtime.h"
+#include "artifacts/ffn_artifact.h"
 
 #include <chrono>
 #include <cstdio>
@@ -388,14 +390,27 @@ struct WeightState {
     BufferView view;
 };
 
+struct FFNWeightState {
+    PreparedWeight gate;
+    PreparedWeight up;
+    PreparedWeight down;
+    FFNWeightState(const DeviceContext &device, TensorBinding gate_binding,
+                   TensorBinding up_binding, TensorBinding down_binding)
+        : gate(device, gate_binding), up(device, up_binding), down(device, down_binding) {}
+};
+
 struct ModuleState {
     std::shared_ptr<DeviceState> device;
     MatmulShape shape;
     contracts::PointwiseSpec pointwise;
+    contracts::FFNCompileSpec ffn;
+    std::string program_sha256;
     std::vector<BufferView> arguments;
     std::size_t output_rows = 0, output_cols = 0;
     void Initialize(const std::string &path, const std::string &entry,
-                    const char *abi_key, const std::string &abi, std::size_t arity);
+                    const char *abi_key, const std::string &abi, std::size_t arity,
+                    std::vector<std::uint8_t> verified_bytecode = {});
+    void UpdateActivation(TensorBinding binding);
     std::vector<float> Invoke();
     // The bytecode module borrows these bytes. Context/module handles must
     // be destroyed before the vector; vector storage is never changed.
@@ -481,11 +496,14 @@ LoadedModule::LoadedModule(const DeviceContext &device, const std::string &vmfb_
 
 void detail::ModuleState::Initialize(const std::string &path, const std::string &entry,
                                     const char *abi_key, const std::string &abi,
-                                    std::size_t arity) {
+                                    std::size_t arity,
+                                    std::vector<std::uint8_t> verified_bytecode) {
     auto &owner = *device;
     owner.RequireHealthy();
     const auto start = Clock::now();
-    bytecode = ReadModule(path);
+    // Legacy matmul/pointwise callers supply a file. FFN callers supply the
+    // exact owned snapshot returned by the artifact validator, never a path.
+    bytecode = verified_bytecode.empty() ? ReadModule(path) : std::move(verified_bytecode);
     const auto allocator = iree_allocator_system();
     Check(iree_vm_bytecode_module_create(
               owner.instance.get(), IREE_VM_BYTECODE_MODULE_FLAG_NONE,
@@ -495,14 +513,14 @@ void detail::ModuleState::Initialize(const std::string &path, const std::string 
     Check(iree_vm_module_lookup_function_by_name(
               module.get(), IREE_VM_FUNCTION_LINKAGE_EXPORT,
               iree_make_cstring_view(entry.c_str()), &function),
-          "find matmul export or pointwise export");
+          "find numerical program export");
     const auto actual_abi = ToString(iree_vm_function_lookup_attr_by_name(
         &function, iree_make_cstring_view(abi_key)));
     if (actual_abi != abi) {
         throw std::runtime_error("VMFB ABI mismatch: expected '" + abi + "', got '" + actual_abi + "'");
     }
     const auto signature = iree_vm_function_signature(&function);
-    const std::string expected = arity == 1 ? "0r_r" : "0rr_r";
+    const std::string expected = "0" + std::string(arity, 'r') + "_r";
     if (ToString(signature.calling_convention) != expected) {
         throw std::runtime_error("unexpected synchronous tensor calling convention");
     }
@@ -546,17 +564,7 @@ std::vector<float> LoadedModule::Run(TensorBinding activation, const PreparedWei
     iree_vm_list_clear(clear.outputs);
     ++owner.counters.calls_attempted;
     try {
-        if (!state_->activation.get()) {
-            state_->activation = owner.Upload(activation);
-        } else {
-            Check(iree_hal_device_transfer_h2d(
-                      owner.host_device.get(), activation.data,
-                      iree_hal_buffer_view_buffer(state_->activation.get()), 0,
-                      activation.element_count * sizeof(float),
-                      IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()),
-                  "update activation buffer");
-            owner.counters.upload_bytes += activation.element_count * sizeof(float);
-        }
+        state_->UpdateActivation(activation);
         PushBuffer(clear.inputs, state_->activation.get());
         PushBuffer(clear.inputs, weights.state_->view.get());
 
@@ -565,6 +573,21 @@ std::vector<float> LoadedModule::Run(TensorBinding activation, const PreparedWei
         // No partial output is returned and no implicit CPU replay is attempted.
         owner.poisoned = true;
         throw;
+    }
+}
+
+void detail::ModuleState::UpdateActivation(TensorBinding binding) {
+    auto &owner = *device;
+    if (!activation.get()) {
+        activation = owner.Upload(binding);
+    } else {
+        Check(iree_hal_device_transfer_h2d(
+                  owner.host_device.get(), binding.data,
+                  iree_hal_buffer_view_buffer(activation.get()), 0,
+                  binding.element_count * sizeof(float),
+                  IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT, iree_infinite_timeout()),
+              "update activation buffer");
+        owner.counters.upload_bytes += binding.element_count * sizeof(float);
     }
 }
 
@@ -664,6 +687,84 @@ std::vector<float> PointwiseModule::Run(const std::vector<TensorBinding> &bindin
         }
         return state_->Invoke();
     } catch (...) {
+        owner.poisoned = true;
+        throw;
+    }
+}
+
+PreparedFFNWeights::PreparedFFNWeights(const DeviceContext &device,
+                                      const contracts::FFNCompileSpec &spec,
+                                      TensorBinding gate, TensorBinding up, TensorBinding down) {
+    contracts::ValidateFFNSpec(spec);
+    // Reject the complete boundary before allocating any device snapshots.
+    const auto &shape = spec.shape;
+    gate.Validate(shape.f, shape.d);
+    up.Validate(shape.f, shape.d);
+    down.Validate(shape.d, shape.f);
+    state_ = std::make_unique<detail::FFNWeightState>(device, gate, up, down);
+}
+PreparedFFNWeights::~PreparedFFNWeights() = default;
+PreparedFFNWeights::PreparedFFNWeights(PreparedFFNWeights &&) noexcept = default;
+PreparedFFNWeights &PreparedFFNWeights::operator=(PreparedFFNWeights &&) noexcept = default;
+
+FFNModule::FFNModule(const DeviceContext &device, const std::string &directory,
+                     const contracts::FFNCompileSpec &spec)
+    : state_(std::make_unique<detail::ModuleState>()) {
+    contracts::ValidateFFNSpec(spec);
+    state_->device = device.state_;
+    state_->device->RequireHealthy();
+    auto artifact = artifacts::LoadFFNArtifact(directory, spec);
+    state_->ffn = spec;
+    state_->program_sha256 = artifact.program_sha256;
+    state_->output_rows = spec.shape.m;
+    state_->output_cols = spec.shape.d;
+    // Initialize compares actual VM function reflection and the four-reference
+    // calling convention before creating a VM context or running initializers.
+    state_->Initialize("", contracts::kFFNEntryPoint, contracts::kFFNReflectionKey,
+                       artifact.reflection, 4, std::move(artifact.bytecode));
+}
+FFNModule::~FFNModule() = default;
+std::string FFNModule::program_sha256() const {
+    if (!state_) throw std::invalid_argument("cannot inspect a moved-from FFN module");
+    return state_->program_sha256;
+}
+FFNModule::FFNModule(FFNModule &&) noexcept = default;
+FFNModule &FFNModule::operator=(FFNModule &&) noexcept = default;
+
+std::vector<float> FFNModule::Run(TensorBinding activation, const PreparedFFNWeights &weights) {
+    if (!state_ || !weights.state_) {
+        throw std::invalid_argument("cannot use a moved-from FFN module or weights");
+    }
+    auto &owner = *state_->device;
+    owner.RequireHealthy();
+    const auto &shape = state_->ffn.shape;
+    activation.Validate(shape.m, shape.d);
+    const auto &gate = *weights.state_->gate.state_;
+    const auto &up = *weights.state_->up.state_;
+    const auto &down = *weights.state_->down.state_;
+    if (gate.device != state_->device || up.device != state_->device ||
+        down.device != state_->device ||
+        gate.rows != static_cast<std::size_t>(shape.f) ||
+        gate.cols != static_cast<std::size_t>(shape.d) ||
+        up.rows != gate.rows || up.cols != gate.cols ||
+        down.rows != gate.cols || down.cols != gate.rows) {
+        throw std::invalid_argument("FFN weights belong to another context or shape");
+    }
+
+    ClearCallLists clear{state_->inputs.get(), state_->outputs.get()};
+    iree_vm_list_clear(clear.inputs);
+    iree_vm_list_clear(clear.outputs);
+    ++owner.counters.calls_attempted;
+    try {
+        state_->UpdateActivation(activation);
+        PushBuffer(clear.inputs, state_->activation.get());
+        PushBuffer(clear.inputs, gate.view.get());
+        PushBuffer(clear.inputs, up.view.get());
+        PushBuffer(clear.inputs, down.view.get());
+        return state_->Invoke();
+    } catch (...) {
+        // An attempted dispatch may have changed device state. Do not retry
+        // this context or expose a partially computed output.
         owner.poisoned = true;
         throw;
     }

@@ -261,6 +261,21 @@ GGML 的 graph_optimize 在 scheduler 切分后运行，不能自然跨过分给
 
 M0/M1 已经完成单算子 AOT。本阶段把它推广为可独立发布、重载和验证的 FFN artifact。
 
+当前实施状态（2026-11-18）：M4 既定 AOT 软件范围的六步实施与验收已完成：artifact 契约、
+完整 FFN AOT 编译入口、独立 FFN runtime、独立 runner 与三方验收、GGML region 执行、compiler 不可用环境部署验收。
+14 组合成案例和真实模型的 20 段 FFN，在 9 组 exact profile 上通过
+GGML CPU / 官方 StableHLO interpreter / Coral MPACT 对照与跨进程重载。
+这里的实施步骤并非下方长期任务清单的序号。完整 region 已接入未打补丁的
+GGML backend；真实模型执行 20 次完整 FFN，和逐算子路径 logits 完全一致，
+外层 VM 调用从 164 次降到 104 次。MPACT 测量未显示延迟加速。
+最终部署验收使用没有 compiler 可执行入口的独立 Linux 根文件系统，
+27 个隔离进程覆盖真实模型、9 组 FFN profile 和独立 matmul。
+运行环境中 compiler 启动实际返回 ENOENT；开发环境的 compiler 与构建缓存保留。
+见 [部署验收报告](m4-deployment-test-report.md)。这不表示 SoC 或 v0.1.0 发布已完成。
+见 [GGML region 测试报告](m4-ggml-region-test-report.md)。
+见 [artifact/runtime guide](m4-artifacts.md)、[runner guide](m4-runner.md)
+和 [runner 测试报告](m4-runner-test-report.md)。
+
 **任务**
 
 1. 接收 M3 已验证的 StableHLO module 和 FFN compile spec，调用同一 Coral IREE compiler；不再增加一层自定义计算 IR 转换。

@@ -4,7 +4,7 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 
 cc_library(
     name = "stablehlo_program",
-    srcs = ["stablehlo_program.cc", "stablehlo_ops.cc"],
+    srcs = ["stablehlo_program.cc", "stablehlo_ops.cc", "ffn_aot.cc"],
     hdrs = ["stablehlo_program.h", "stablehlo_ops.h"],
     visibility = ["//visibility:public"],
     deps = [

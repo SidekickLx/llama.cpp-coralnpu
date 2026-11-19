@@ -1,0 +1,5 @@
+// Generated from the locked dependencies and local pinned CRT sources.
+#pragma once
+inline constexpr char kFFNDependencyLock[] = R"coral_lock(@FFN_LOCK_JSON@)coral_lock";
+inline constexpr char kFFNDependencyLockHash[] = "@FFN_LOCK_SHA256@";
+inline constexpr char kFFNRuntimeSources[] = R"coral_sources(@FFN_SOURCE_HASHES@)coral_sources";

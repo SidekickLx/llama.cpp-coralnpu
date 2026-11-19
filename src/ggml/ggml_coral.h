@@ -19,6 +19,18 @@ struct NodeEvent {
     std::uint64_t compute_call = 0; // One received graph_compute range.
 };
 
+// One completed region invocation. Member tensors are borrowed only for this
+// synchronous callback; their intermediate data was not materialized.
+struct FFNEvent {
+    const planner::GGMLFFNPlan &plan;
+    std::string program_sha256;
+    std::uint64_t dispatches;
+    std::uint64_t instructions;
+    bool weight_cache_hit;
+    std::uint64_t compute_call;
+    double invoke_ms;
+};
+
 struct Options {
     std::string artifact_directory;
     // Opt-in promise: WEIGHTS leaf tensors remain immutable and their storage
@@ -32,6 +44,10 @@ struct Options {
     // The application owns scheduler callbacks. Keep the conservative default
     // unless it guarantees that per-node evaluation callbacks are absent.
     bool evaluation_callbacks = true;
+    // Optional ffn.tsv entries enable complete regions. Keeping this false
+    // provides the same member path for diagnostics and numerical comparison.
+    bool enable_ffn = true;
+    void (*ffn_trace)(const FFNEvent &, void *) = nullptr;
 };
 
 struct Stats {
@@ -41,6 +57,12 @@ struct Stats {
     std::uint64_t ffn_candidates = 0;
     std::uint64_t ffn_preparation_plans = 0;
     std::uint64_t ffn_rejections = 0;
+    std::uint64_t ffn_calls = 0;
+    std::uint64_t ffn_members_skipped = 0;
+    std::uint64_t ffn_missing_artifacts = 0;
+    std::uint64_t ffn_guard_rejections = 0;
+    std::uint64_t ffn_weight_preparations = 0;
+    std::uint64_t ffn_weight_cache_hits = 0;
     std::uint64_t matmuls = 0;
     std::uint64_t pointwise_calls = 0;
     std::uint64_t weight_cache_hits = 0;
@@ -57,7 +79,7 @@ bool CompatiblePointwise(const ggml_tensor *op,
 
 // Register once, before model/context creation. Configuration and execution
 // are confined to one host thread. All GGML C callbacks contain exceptions.
-// Reads profiles.tsv and optional pointwise.tsv eagerly; supports_op only
+// Reads profiles.tsv and optional pointwise.tsv/ffn.tsv indexes eagerly; supports_op only
 // queries their in-memory indexes. Missing members stay on another backend.
 void Register(const Options &options);
 Stats GetStats();

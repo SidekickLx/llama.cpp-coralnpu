@@ -7,11 +7,17 @@ them, and how to prove where the computation happened.
 
 The long-term goal is to run llama.cpp on a simulated SoC with a CoralNPU
 accelerator. Today, llama.cpp runs on the Linux host and offloads supported
-matrix multiplications to MPACT through IREE.
+matrix multiplications, selected pointwise operations and complete F32 FFN regions
+to MPACT through IREE.
 
 **Status: unreleased research prototype.** M1 (standalone runtime), M2
 (GGML integration and a small model), and M3 (F32 FFN import, reference semantics
 and placement legality) have passed their scoped functional acceptance tests.
+M4 provides [complete FFN AOT artifacts and an independent runtime](docs/m4-artifacts.md),
+a [standalone runner with three-way numerical acceptance](docs/m4-runner.md), and
+[complete-region GGML execution](docs/m4-ggml-regions.md).
+Its [compiler-free deployment gate](docs/m4-deployment-test-report.md) has also
+passed, completing the planned M4 AOT software acceptance scope.
 These are development milestones. The first `v0.1.0` release
 is reserved for SoC integration; completing M2 does not constitute that release.
 
@@ -27,6 +33,12 @@ is reserved for SoC integration; completing M2 does not constitute that release.
   unsupported operations on the CPU.
 - **Ahead-of-time compilation:** static shapes are exported to StableHLO and
   compiled to IREE VM bytecode modules (`.vmfb`). Weights remain runtime inputs.
+- **Complete FFN AOT:** verified imported StableHLO becomes a versioned,
+  integrity-checked package; an independent four-input FFN runtime executes it
+  with immutable weight snapshots and strict Coral execution evidence.
+- **Complete FFN regions in GGML:** eligible same-split FFNs use one VM call,
+  with live legality checks, allocation dependencies, layer-specific weight
+  caches, member fallback and explicit region execution traces.
 - **Persistent C++ runtime:** VM/device lifetime management, tensor ABI checks,
   module reuse, and an opt-in immutable model-weight cache.
 - **A real model path:** llama.cpp loads GGUF, tokenizes the prompt, builds
@@ -41,8 +53,8 @@ is reserved for SoC integration; completing M2 does not constitute that release.
 
 Current limits: Linux x86_64, single-threaded diagnostic inference, synchronous
 execution, and a validated tiny F32 model. Attention and other unsupported
-operations still run on the CPU. FFN subgraph compilation, JIT, W8A8/W4A8,
-concurrent requests, and SoC/Linux-driver integration remain future work.
+operations still run on the CPU. JIT, W8A8/W4A8, concurrent requests, and
+SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
 
 M3 frontend and planning work provides the [FFN contracts](docs/m3-contracts.md),
@@ -56,8 +68,15 @@ against GGML CPU. Fusion checks cover external consumers, views, callbacks,
 graph reuse and input lifetime through unmodified upstream interfaces.
 [Standalone member execution and real FFN placement](docs/m3-pointwise.md)
 are verified: complete FFN members can share a Coral compute range.
-They still execute as separate programs. Invoking a complete FFN VMFB and
-comparing CPU/StableHLO/Coral results belongs to M4.
+M4 compiles and executes complete FFN VMFBs through a C++ interface and CLI.
+The [runner acceptance](docs/m4-runner-test-report.md) covers 14 synthetic
+cases and 20 captured real-model regions against GGML CPU and the official
+StableHLO interpreter. [GGML region acceptance](docs/m4-ggml-region-test-report.md)
+now proves 20 whole-FFN calls in real model inference, identical logits to
+member execution, and safe handling of callbacks, graph reuse and fallback.
+The [final deployment gate](docs/m4-deployment-test-report.md) verifies actual
+model inference and all nine FFN profiles in a separate runtime filesystem
+where compiler entry points are physically absent.
 
 ## How it works
 
@@ -69,8 +88,10 @@ Inference:
   GGUF -> llama.cpp -> GGML scheduler
                         |-- unsupported operations -> CPU
                         +-- supported F32 members -> Coral adapter
-                                                 -> IREE VM / HAL
-                                                 -> MPACT CoralNPU simulation
+                              |-- eligible FFN region -> one complete FFN VM call
+                              +-- other members -> individual VM calls
+                                                  -> IREE VM / HAL
+                                                  -> MPACT CoralNPU simulation
 ~~~
 
 GGUF contains model metadata and tensors. It is not translated wholesale into
@@ -78,7 +99,10 @@ StableHLO here. The exporter emits one matmul program per static shape, with
 the contract `Y[M,N] = X[M,K] × transpose(W[N,K])`. The compiler runs during
 preparation; inference only loads existing VMFBs. The Quick start below retains
 the matmul-only M2 path. The [M3 member guide](docs/m3-pointwise.md) adds
-the separate `pointwise.tsv` catalog and same-split validation.
+the separate `pointwise.tsv` catalog and same-split validation. The
+[M4 region guide](docs/m4-ggml-regions.md) adds `ffn.tsv` packages and enables
+whole-FFN execution with `--observation backend`; `--ffn off` retains members
+for comparison.
 
 A missing shape is ineligible for Coral and stays on the CPU. Once an operation
 is accepted for Coral execution, an invalid artifact or runtime failure is
@@ -579,6 +603,36 @@ artifacts and logs, and writes a new report under `build/m3-acceptance-results/`
 See the [M3 acceptance report](docs/m3-ffn-acceptance.md) for exact coverage,
 numerical results, diagnostic timing and the M4 boundary.
 
+### Independent complete FFN runner
+
+Build `coral-ffn-runner` and `coral-ffn-cpu-reference` using the existing M2
+configuration. The [runner guide](docs/m4-runner.md) explains tensor inputs,
+batch execution, safe result publication and the three-way verifier.
+The [recorded report](docs/m4-runner-test-report.md) includes a command for
+replaying a captured real-model FFN, all nine profiles, numerical errors,
+fresh-process reload evidence and simulator timings.
+
+### Complete GGML FFN regions
+
+The [integration guide](docs/m4-ggml-regions.md) documents the optional
+`ffn.tsv` catalog, plan lifetime, fallback rules, cache ownership and counters.
+The [acceptance report](docs/m4-ggml-region-test-report.md) contains reproducible
+commands, raw evidence locations and paired model measurements. Build
+`coral-ffn-region-test` for scheduler boundary tests, then run
+`tests/ggml/verify_ffn_region_backend.py` and `tests/ggml/verify_ffn_regions.py`
+with your retained matmul, pointwise and complete FFN artifact directories.
+Inference invokes no compiler; a clean locked llama.cpp checkout is required.
+
+### AOT deployment without a compiler
+
+The [deployment acceptance report](docs/m4-deployment-test-report.md) shows how
+to prepare an isolated runtime root containing only runners, runtime libraries,
+model data and AOT packages, then verify it in Linux namespaces.
+The test checks actual compiler-launch failures, fresh-process loading,
+mixed matmul/FFN model execution and numerical results. Development compilers
+and caches stay intact. Namespace/chroot setup requires root; all deployed
+programs run as an unprivileged user.
+
 ### Performance measurements
 
 After correctness passes, measure repeated CPU/Coral runs on the same inputs:
@@ -604,12 +658,16 @@ traffic or peak device memory.
 
 | Path | Responsibility |
 | --- | --- |
-| [`src/runtime/`](src/runtime/) | M1 C++ runtime, VM/HAL and simulator ownership, tensor ABI, standalone runner |
+| [`src/runtime/`](src/runtime/) | Shared VM/HAL runtime, matmul/pointwise execution, complete FFN modules and weight snapshots |
+| [`src/artifacts/`](src/artifacts/) | FFN package integrity, compatibility and ABI validation without compiler dependencies |
 | [`src/ggml/`](src/ggml/) | Backend capability/routing logic, artifact and weight-cache integration, model runner |
-| [`src/support/`](src/support/) | Shared JSON output helpers |
-| [`src/contracts/`](src/contracts/) | M3 FFN ABI, shape, numerical policy, and tensor-role metadata |
+| [`src/support/`](src/support/) | Shared JSON helpers and bounded FFN tensor input/output |
+| [`src/validation/`](src/validation/) | Separate GGML CPU FFN oracle for numerical acceptance |
+| [`src/contracts/`](src/contracts/) | FFN ABI, shapes, numerical policy, tensor roles and artifact contract |
 | [`src/planner/`](src/planner/) | M3 FFN recognition, capability/legality checks, allocation dependencies and live guards |
 | [`compiler/export_matmul.py`](compiler/export_matmul.py) | Export static F32 matmul shapes to StableHLO text |
+| [`compiler/compile_ffn.py`](compiler/compile_ffn.py) | Admit, compile, validate and atomically publish complete FFN AOT packages |
+| [`artifacts/`](artifacts/) | Versioned artifact manifest schemas; generated binaries stay in ignored build directories |
 | [`tests/runtime/`](tests/runtime/) | Standalone runtime validation across compiled profiles |
 | [`tests/ggml/`](tests/ggml/) | Adapter boundaries, model comparisons, and performance measurements |
 | [`docs/`](docs/) | Plan, environment baseline, run guides, and validation reports |
@@ -679,8 +737,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes complete FFN member support and same-split placement,
-full-region compilation and execution, AOT/JIT artifact management,
+Future work includes JIT artifact management,
 W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
 will be assigned separately from development milestones.

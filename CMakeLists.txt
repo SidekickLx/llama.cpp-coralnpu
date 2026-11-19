@@ -64,9 +64,12 @@ include_directories(
 add_subdirectory("${CORALNPU_SOURCE_DIR}/third_party/iree"
                  "${CMAKE_BINARY_DIR}/iree" EXCLUDE_FROM_ALL)
 
+add_subdirectory(src/artifacts)
+
 add_library(coral_m1_runtime STATIC src/runtime/matmul_runtime.cc)
 target_include_directories(coral_m1_runtime PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(coral_m1_runtime PRIVATE
+    coral_ffn_artifact
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -82,6 +85,15 @@ target_link_libraries(coral_m1_runtime PRIVATE
     coralnpu_metrics_runtime::stats_collector
 )
 
+# Shared diagnostic tensor I/O, separate from the reusable VM/HAL runtime.
+add_library(coral_ffn_io STATIC src/support/ffn_io.cc)
+target_link_libraries(coral_ffn_io PUBLIC coral_ffn_artifact)
+target_include_directories(coral_ffn_io SYSTEM PUBLIC "${PROJECT_SOURCE_DIR}/repos/llama.cpp/vendor")
+target_compile_options(coral_ffn_io PRIVATE -Wall -Wextra -fexceptions)
+add_executable(coral-ffn-runner src/runtime/ffn_runner.cc)
+target_link_libraries(coral-ffn-runner PRIVATE coral_m1_runtime coral_ffn_io)
+target_compile_options(coral-ffn-runner PRIVATE -Wall -Wextra -fexceptions)
+
 add_executable(coral-matmul-runner src/runtime/matmul_runner.cc)
 target_link_libraries(coral-matmul-runner PRIVATE coral_m1_runtime)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
@@ -93,6 +105,9 @@ endif()
 # Configuration never exports, compiles or executes a test artifact.
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(coral-aot-environment-probe tests/deployment/environment_probe.cc)
+    target_include_directories(coral-aot-environment-probe PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_compile_options(coral-aot-environment-probe PRIVATE -Wall -Wextra -fexceptions)
     foreach(m IN ITEMS 1 16 32)
         set(M1_VMFB_M${m} "" CACHE FILEPATH
             "M1 strict F32 VMFB for M=${m}, K=16, N=8")

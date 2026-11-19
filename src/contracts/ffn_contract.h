@@ -6,7 +6,7 @@
 namespace coral::contracts {
 
 // These are metadata contracts, not a computational IR or a serialized C++ ABI.
-// See docs/m3-contracts.md. Validation and execution arrive in later M3/M4 steps.
+// See docs/m3-contracts.md and docs/m4-artifacts.md for validation and execution.
 inline constexpr std::uint32_t kFFNContractVersion = 1;
 inline constexpr char kFFNAbi[] = "coral.ffn.f32.v1";
 inline constexpr char kFFNEntryPoint[] = "ffn";
