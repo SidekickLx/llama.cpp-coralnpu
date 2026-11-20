@@ -33,3 +33,10 @@ cc_library(
     deps = [":contracts", ":ggml_headers"],
     visibility = ["//visibility:public"],
 )
+
+cc_library(
+    name = "strict_json",
+    hdrs = ["src/support/strict_json.h", "repos/llama.cpp/vendor/nlohmann/json.hpp"],
+    includes = ["src", "repos/llama.cpp/vendor"],
+    visibility = ["//visibility:public"],
+)

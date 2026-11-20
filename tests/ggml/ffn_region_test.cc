@@ -121,6 +121,7 @@ struct Observation {
 };
 void Scheduled(ggml_backend_t cpu, int rows, int spelling,
                const std::string &mode, bool immutable) {
+    const auto planning_before = adapter::GetStats();
     Fixture f(cpu, rows, spelling, mode);
     Fixture reference(cpu, rows, spelling, mode);
     Buffer reference_storage(ggml_backend_alloc_ctx_tensors(reference.context.get(), cpu),
@@ -146,6 +147,9 @@ void Scheduled(ggml_backend_t cpu, int rows, int spelling,
     }
     Require(ggml_backend_sched_alloc_graph(scheduler.get(), f.graph), "allocate graph");
     const auto before = adapter::GetStats();
+    Require(before.jit.requests == planning_before.jit.requests &&
+            before.jit.worker_launches == planning_before.jit.worker_launches,
+            "reservation/allocation unexpectedly invoked JIT");
     const bool rejected = mode == "external-consumer" || mode == "external-view" ||
         mode == "callbacks" || mode == "callback-subdivision" || mode == "stale-metadata" ||
         mode == "missing" || mode == "disabled" || mode == "missing-member";
@@ -225,17 +229,20 @@ void Corrupt(ggml_backend_t coral, ggml_backend_t cpu) {
     Require(Read(f.y) == marker, "corrupt region published output");
     Require(adapter::GetStats().runtime.calls_attempted == before.runtime.calls_attempted &&
             adapter::GetStats().matmuls == before.matmuls, "corrupt region replayed members");
+    const auto launches = adapter::GetStats().jit.worker_launches;
     Require(ggml_backend_sched_graph_compute(scheduler.get(), f.graph) == GGML_STATUS_FAILED,
             "failed backend allowed retry");
+    Require(adapter::GetStats().jit.worker_launches == launches, "failed backend relaunched a worker");
 }
 } // namespace
 int main(int argc, char **argv) {
     try {
-        Require(argc == 3, "Usage: coral-ffn-region-test MODE CATALOG");
+        Require(argc == 3 || argc == 4, "Usage: coral-ffn-region-test MODE CATALOG [JIT_CONFIG]");
         const std::string mode = argv[1];
         Observation events;
         adapter::Options options;
         options.artifact_directory = argv[2];
+        if (argc == 4) options.jit_configuration = argv[3];
         options.evaluation_callbacks = mode == "callbacks";
         options.enable_ffn = mode != "disabled";
         options.immutable_model_weights = mode == "immutable";
@@ -250,7 +257,7 @@ int main(int argc, char **argv) {
         }
         // Each scheduled fixture destroys its backend/cache before its weights.
         // Independent contexts must prepare their own snapshots.
-        if (mode == "corrupt") {
+        if (mode == "corrupt" || mode == "jit-failure") {
             Backend coral(ggml_backend_dev_init(ggml_backend_dev_by_name("CORAL"), nullptr),
                           ggml_backend_free);
             Corrupt(coral.get(), cpu.get());
@@ -284,6 +291,10 @@ int main(int argc, char **argv) {
                   << ",\"members_skipped\":" << stats.ffn_members_skipped
                   << ",\"dispatches\":" << stats.runtime.coral_dispatches
                   << ",\"instructions\":" << stats.runtime.kernel_instructions
+                  << ",\"jit_requests\":" << stats.jit.requests
+                  << ",\"jit_worker_launches\":" << stats.jit.worker_launches
+                  << ",\"jit_compilations\":" << stats.jit.compilations
+                  << ",\"jit_disk_hits\":" << stats.jit.disk_hits
                   << ",\"max_abs_error\":" << maximum_error << "}\n";
         return 0;
     } catch (const std::exception &error) {

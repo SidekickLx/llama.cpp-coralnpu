@@ -51,9 +51,16 @@ is reserved for SoC integration; completing M2 does not constitute that release.
 - **Numerical and failure tests:** fixed-token CPU/Coral comparison, adapter
   capability boundaries, mixed graphs, mutable weights, and error propagation.
 
+An opt-in [FFN JIT path](docs/m5-jit.md) shares the AOT compiler service,
+validates persistent artifacts and invokes an isolated compiler worker only
+on a cache miss. [Steps 1–3 acceptance](docs/m5-jit-test-report.md) covers real
+model inference, cache recovery and default compiler-free AOT regression.
+Loaded modules remain in the inference process. Eligible
+regions still require existing member capability and exact F32 profiles.
+
 Current limits: Linux x86_64, single-threaded diagnostic inference, synchronous
 execution, and a validated tiny F32 model. Attention and other unsupported
-operations still run on the CPU. JIT, W8A8/W4A8, concurrent requests, and
+operations still run on the CPU. General operator JIT, M buckets, W8A8/W4A8, concurrent requests, and
 SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
 
@@ -96,7 +103,7 @@ Inference:
 
 GGUF contains model metadata and tensors. It is not translated wholesale into
 StableHLO here. The exporter emits one matmul program per static shape, with
-the contract `Y[M,N] = X[M,K] × transpose(W[N,K])`. The compiler runs during
+the contract `Y[M,N] = X[M,K] × transpose(W[N,K])`. In the default AOT mode, the compiler runs during
 preparation; inference only loads existing VMFBs. The Quick start below retains
 the matmul-only M2 path. The [M3 member guide](docs/m3-pointwise.md) adds
 the separate `pointwise.tsv` catalog and same-split validation. The
@@ -633,6 +640,14 @@ mixed matmul/FFN model execution and numerical results. Development compilers
 and caches stay intact. Namespace/chroot setup requires root; all deployed
 programs run as an unprivileged user.
 
+### FFN JIT and persistent cache
+
+The [M5 guide](docs/m5-jit.md) covers configuration, worker isolation, cache
+identity, invalidation, failure recovery, counters and reproducible tests.
+JIT is disabled by default. Use `--jit-config` with backend observation and a
+member catalog to compile missing complete FFN packages on demand.
+Existing AOT entries take precedence.
+
 ### Performance measurements
 
 After correctness passes, measure repeated CPU/Coral runs on the same inputs:
@@ -737,7 +752,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes JIT artifact management,
+Future work includes weight-layout optimization and M bucket specialization,
 W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
 will be assigned separately from development milestones.

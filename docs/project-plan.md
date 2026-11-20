@@ -298,6 +298,15 @@ GGML backend；真实模型执行 20 次完整 FFN，和逐算子路径 logits �
 
 ## M5 JIT 缓存与两项 IR 优化
 
+Implementation status (2026-11-20): steps 1–3 are implemented and accepted:
+the unified canonical StableHLO compile service, validated persistent cache,
+and opt-in synchronous FFN compiler worker are connected to GGML execution.
+A cold real-model run compiles the two exact FFN profiles once each; a new
+process reuses both artifacts without launching a child process. P1/P2 remain
+pending. See [architecture](m5-jit.md) and [acceptance evidence](m5-jit-test-report.md).
+Member capability and fusion legality still gate JIT; the pinned llama.cpp
+checkout remains unmodified.
+
 **任务**
 
 1. 统一入口 `compile_region(canonical_ir, profile, target, numeric_policy)`，由 AOT CLI 和 JIT miss 共用。

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -32,6 +33,7 @@ using WeightKey = std::tuple<std::uintptr_t, std::uintptr_t, std::size_t, std::s
 
 struct Registration {
     Options options;
+    std::unique_ptr<jit::FFNJitClient> jit_client;
     std::map<ShapeKey, std::string> artifacts;
     std::map<PointwiseKey, std::string> pointwise_artifacts;
     std::map<FFNKey, std::string> ffn_artifacts;
@@ -165,9 +167,32 @@ struct BackendContext {
         if (module == ffn_modules.end()) {
             // A listed but corrupt/incompatible package is an error. Do not
             // conceal deployment failures by replaying its original members.
-            auto loaded = std::make_unique<runtime::FFNModule>(
-                device, registration.ffn_artifacts.at(key), spec);
+            const auto aot = registration.ffn_artifacts.find(key);
+            std::string directory, expected_program;
+            if (aot != registration.ffn_artifacts.end()) {
+                directory = aot->second;
+            } else {
+                if (!registration.jit_client) {
+                    const auto start = std::chrono::steady_clock::now();
+                    registration.jit_client = std::make_unique<jit::FFNJitClient>(
+                        registration.options.jit_configuration);
+                    registration.stats.jit_initialization_ms +=
+                        std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - start).count();
+                }
+                // Planning/capability queries never compile. The live guard has
+                // already passed; this synchronous miss keeps our VM/device alive.
+                const auto artifact = registration.jit_client->Resolve(plan, registration.stats.jit);
+                directory = artifact.directory;
+                expected_program = artifact.program_sha256;
+            }
+            auto loaded = std::make_unique<runtime::FFNModule>(device, directory, spec);
+            if (!expected_program.empty() && loaded->program_sha256() != expected_program) {
+                throw std::runtime_error("JIT artifact changed before module load");
+            }
             module = ffn_modules.emplace(key, std::move(loaded)).first;
+        } else {
+            ++registration.stats.ffn_module_cache_hits;
         }
         std::array<TensorBinding, 4> bindings;
         FFNWeightKey weight_key{};
@@ -458,7 +483,8 @@ void GraphOptimize(ggml_backend_t backend, ggml_cgraph *graph,
                 ++registration.stats.ffn_preparation_plans;
                 const auto &plan = std::get<planner::GGMLFFNPlan>(result);
                 if (registration.options.enable_ffn) {
-                    if (registration.ffn_artifacts.count(Key(plan.shape))) {
+                    if (registration.ffn_artifacts.count(Key(plan.shape)) ||
+                        !registration.options.jit_configuration.empty()) {
                         split.regions.push_back(plan);
                     } else {
                         ++registration.stats.ffn_missing_artifacts;

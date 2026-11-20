@@ -2,7 +2,12 @@
 #include "stablehlo_program.h"
 #include "llvm/Support/raw_ostream.h"
 
+namespace coral::compiler { int ImportGGMLSnapshot(const char *, const char *); }
+
 int main(int argc, char **argv) {
+    if (argc == 4 && llvm::StringRef(argv[1]) == "import-ggml-ffn") {
+        return coral::compiler::ImportGGMLSnapshot(argv[2], argv[3]);
+    }
     mlir::MLIRContext context;
     if (argc == 8 && llvm::StringRef(argv[1]) == "prepare-ffn") {
         coral::contracts::FFNCompileSpec spec;

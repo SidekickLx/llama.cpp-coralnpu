@@ -3,6 +3,7 @@
 
 #include "ggml-backend.h"
 #include "runtime/matmul_runtime.h"
+#include "jit/ffn_jit.h"
 #include <cstdint>
 #include <string>
 
@@ -47,11 +48,17 @@ struct Options {
     // Optional ffn.tsv entries enable complete regions. Keeping this false
     // provides the same member path for diagnostics and numerical comparison.
     bool enable_ffn = true;
+    // Explicit opt-in. Empty preserves compiler-free AOT behavior. Only
+    // missing complete FFN packages trigger JIT; member support is unchanged.
+    std::string jit_configuration;
     void (*ffn_trace)(const FFNEvent &, void *) = nullptr;
 };
 
 struct Stats {
     runtime::RuntimeStats runtime;
+    jit::Stats jit;
+    double jit_initialization_ms = 0;
+    std::uint64_t ffn_module_cache_hits = 0;
     std::uint64_t graph_calls = 0;
     std::uint64_t graph_optimizations = 0;
     std::uint64_t ffn_candidates = 0;
