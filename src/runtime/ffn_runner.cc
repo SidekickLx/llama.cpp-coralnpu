@@ -21,6 +21,8 @@ JSON Stats(const RuntimeStats &s) {
             {"failed_dispatches", s.failed_dispatches}, {"observer_errors", s.observer_errors},
             {"binding_allocations", s.binding_allocations}, {"upload_bytes", s.upload_bytes},
             {"download_bytes", s.download_bytes}, {"module_load_ms", s.module_load_ms},
+            {"ffn_padded_rows", s.ffn_padded_rows}, {"ffn_cropped_rows", s.ffn_cropped_rows},
+            {"ffn_boundary_ms", s.ffn_boundary_ms},
             {"invoke_ms", s.invoke_ms}};
 }
 int Run(int argc, char **argv) {
@@ -28,7 +30,7 @@ int Run(int argc, char **argv) {
     if (options.help) {
         std::cout << "coral-ffn-runner --artifact DIRECTORY --inputs JSON [--inputs JSON ...]\n"
                      "                 --output NEW_JSON [--repeat 3] [--recreate 1]\n"
-                     "                 [--weight-layout native|transposed]\n"
+                     "                 [--weight-layout native|transposed] [--capacity-m B]\n"
                      "Inputs: positional M3 F32 tensor JSON (X, gate, up, down).\n"
                      "All cases must share an exact profile. Each gets independent weights.\n"
                      "Output is published only after every Coral execution check succeeds.\n"
@@ -40,7 +42,12 @@ int Run(int argc, char **argv) {
     const double input_ms = Milliseconds(input_start);
     auto spec = inputs.front().spec;
     spec.weight_layout = options.weight_layout;
-    const auto &shape = spec.shape;
+    const auto &shape = inputs.front().spec.shape;
+    if (options.capacity_m) {
+        Require(options.capacity_m >= static_cast<std::size_t>(shape.m),
+                "capacity cannot truncate logical rows");
+        spec.shape.m = options.capacity_m;
+    }
     std::vector<std::vector<float>> baselines(inputs.size());
     JSON cases = JSON::array();
     for (std::size_t i = 0; i < inputs.size(); ++i) {
@@ -71,12 +78,12 @@ int Run(int argc, char **argv) {
             for (std::size_t repeat = 0; repeat < options.repeat; ++repeat) {
                 const auto before = device.stats();
                 start = Clock::now();
-                auto output = module.Run(binding, weights);
+                auto output = module.RunRows(binding, weights);
                 const double call_ms = Milliseconds(start);
                 const auto after = device.stats();
                 // Finite checking is a runner policy for diagnostic fixtures;
                 // the reusable runtime's tensor ABI remains general F32.
-                auto tensor = FFNOutput(spec, output);
+                auto tensor = FFNOutput(inputs[i].spec, output);
                 if (cycle == 0 && repeat == 0) {
                     baselines[i] = std::move(output);
                     cases[i]["outputs"] = JSON::array({std::move(tensor)});
@@ -105,7 +112,7 @@ int Run(int argc, char **argv) {
     }
     JSON report{{"schema", "coral.ffn.runner.v1"}, {"status", "passed"},
                 {"engine", "coral-mpact"}, {"program_sha256", program},
-                {"abi", coral::contracts::FFNAbi(spec)},
+                {"abi", coral::contracts::FFNAbi(spec)}, {"capacity_m", spec.shape.m},
                 {"shape", {shape.m, shape.d, shape.f}}, {"repeat", options.repeat},
                 {"recreate", options.recreate}, {"input_read_ms", input_ms},
                 {"cases", std::move(cases)}, {"cycles", std::move(cycles)}};

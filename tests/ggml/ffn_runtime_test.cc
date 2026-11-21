@@ -248,6 +248,83 @@ void CrossProfile(const std::string &first, const FFNCompileSpec &spec,
     std::cout << "{\"status\":\"passed\",\"cross_profile_weight_reuse\":true}\n";
 }
 
+void InvalidRows(FFNModule &module, TensorBinding binding,
+                 const PreparedFFNWeights &weights) {
+    bool rejected = false;
+    try {
+        module.RunRows(binding, weights);
+    } catch (const std::invalid_argument &) {
+        rejected = true;
+    }
+    Require(rejected, "invalid row boundary was accepted");
+}
+
+void Bucket(const std::string &directory, FFNCompileSpec spec, const std::string &layout) {
+    Require(spec.shape.m == 8, "bucket fixture requires capacity 8");
+    if (layout == "transposed")
+        spec.weight_layout = coral::contracts::FFNWeightLayout::Transposed;
+    else Require(layout == "native", "unknown test layout");
+    DeviceContext device;
+    FFNModule module(device, directory, spec);
+    const auto original = Weights(spec, 2);
+    auto prepared = Prepare(device, spec, original);
+    std::vector<float> x(9 * spec.shape.d);
+    auto invalid = TensorBinding::Dense(x, 9, spec.shape.d);
+    InvalidRows(module, invalid, prepared);
+    invalid.rows = 0;
+    InvalidRows(module, invalid, prepared);
+    x.resize(spec.shape.d);
+    invalid = TensorBinding::Dense(x, 1, spec.shape.d);
+    invalid.data = nullptr;
+    InvalidRows(module, invalid, prepared);
+    invalid = TensorBinding::Dense(x, 1, spec.shape.d);
+    --invalid.element_count;
+    InvalidRows(module, invalid, prepared);
+    invalid = TensorBinding::Dense(x, 1, spec.shape.d);
+    invalid.row_stride_bytes += sizeof(float);
+    InvalidRows(module, invalid, prepared);
+    InvalidCall(module, TensorBinding::Dense(x, 1, spec.shape.d), prepared);
+    // The new boundary API cannot silently use weights from the other ABI,
+    // even when the physical dimensions happen to be square.
+    auto wrong_layout = spec;
+    wrong_layout.weight_layout = layout == "native"
+        ? coral::contracts::FFNWeightLayout::Transposed : coral::contracts::FFNWeightLayout::Native;
+    auto wrong = Prepare(device, wrong_layout, original);
+    InvalidRows(module, TensorBinding::Dense(x, 1, spec.shape.d), wrong);
+    DeviceContext other;
+    auto foreign = Prepare(other, spec, original);
+    InvalidRows(module, TensorBinding::Dense(x, 1, spec.shape.d), foreign);
+    Require(device.stats().calls_attempted == 0, "bad boundary reached VM execution");
+    Comparison comparison;
+    std::uint64_t padded = 0;
+    // Reuse one module and owning weight set across growing and shrinking M.
+    for (const auto rows : {8, 1, 7, 2, 5, 1}) {
+        auto logical = spec;
+        logical.shape.m = rows;
+        x.resize(rows * spec.shape.d);
+        Fill(x, rows, 0.02f);
+        const auto output = module.RunRows(TensorBinding::Dense(x, rows, spec.shape.d), prepared);
+        Compare(logical, x, original, output, comparison);
+        padded += 8 - rows;
+    }
+    // An existing snapshot remains immutable; replacement weights require
+    // explicit preparation, but reuse the same compiled module.
+    const auto changed = Weights(spec, 7);
+    auto fresh = Prepare(device, spec, changed);
+    auto logical = spec;
+    logical.shape.m = 1;
+    const auto changed_output = module.RunRows(TensorBinding::Dense(x, 1, spec.shape.d), fresh);
+    Compare(logical, x, changed, changed_output, comparison);
+    padded += 7;
+    const auto stats = device.stats();
+    Require(stats.module_loads == 1 && stats.calls_completed == 7 &&
+            stats.calls_attempted == 7 && stats.ffn_padded_rows == padded &&
+            stats.ffn_cropped_rows == padded && stats.host_executable_load_attempts == 0 &&
+            stats.failed_dispatches == 0 && stats.observer_errors == 0, "bucket reuse accounting failed");
+    std::cout << "{\"status\":\"passed\",\"calls\":7,\"negative_cases\":8,\"padded_rows\":"
+              << padded << ",\"max_abs_error\":" << comparison.max_abs_error << "}\n";
+}
+
 void Reject(const std::string &directory, const FFNCompileSpec &spec,
             const std::string &message, const std::string &valid_directory, bool poison) {
     DeviceContext device;
@@ -299,7 +376,7 @@ void Reject(const std::string &directory, const FFNCompileSpec &spec,
 
 int main(int argc, char **argv) {
     try {
-        if (argc != 6 && argc != 8) throw std::invalid_argument(
+        if (argc != 6 && argc != 7 && argc != 8) throw std::invalid_argument(
             "Usage: ffn-runtime-test run|owned ARTIFACT M D F; reject|poison ARTIFACT M D F MESSAGE VALID");
         FFNCompileSpec spec;
         spec.shape = {std::stoll(argv[3]), std::stoll(argv[4]), std::stoll(argv[5])};
@@ -307,6 +384,8 @@ int main(int argc, char **argv) {
         const std::string mode(argv[1]);
         if (argc == 6 && (mode == "run" || mode == "owned")) {
             RunProfile(argv[2], spec, mode == "owned");
+        } else if (argc == 7 && mode == "bucket") {
+            Bucket(argv[2], spec, argv[6]);
         } else if (argc == 8 && mode == "cross") {
             CrossProfile(argv[2], spec, std::stoll(argv[6]), argv[7]);
         } else if (argc == 8 && (mode == "reject" || mode == "poison")) {

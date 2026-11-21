@@ -267,6 +267,85 @@ mlir::LogicalResult OptimizeFFN(mlir::ModuleOp module,
     return WriteModule(module, ir_path);
 }
 
+mlir::LogicalResult SpecializeFFNRows(mlir::ModuleOp module,
+                                      const contracts::FFNCompileSpec &source,
+                                      int64_t capacity, llvm::StringRef core_path,
+                                      llvm::StringRef boundary_path, llvm::StringRef plan_path) {
+    namespace hlo = mlir::stablehlo;
+    const auto &s = source.shape;
+    constexpr int64_t limit = 2147483647 / sizeof(float);
+    if (capacity < s.m || capacity <= 0 || s.d <= 0 || s.f <= 0 ||
+        capacity > limit / s.d || capacity > limit / s.f)
+        return module.emitError("invalid FFN row capacity");
+    llvm::json::Array source_ops;
+    if (mlir::failed(NormalizeFFN(module, source, source_ops))) return mlir::failure();
+    auto function = module.lookupSymbol<mlir::func::FuncOp>(contracts::kFFNEntryPoint);
+    mlir::OpBuilder builder(module.getContext());
+    const auto logical_type = llvm::cast<mlir::RankedTensorType>(function.getArgument(0).getType());
+    const auto capacity_type = mlir::RankedTensorType::get({capacity, s.d}, builder.getF32Type());
+
+    // Admission above proves row separability: all dots contract feature axes,
+    // every other nonconstant operation is elementwise or a scalar broadcast.
+    // Retarget the actual row-carrying SSA values; weight axes never change.
+    function.getArgument(0).setType(capacity_type);
+    for (auto &op : function.front()) {
+        for (auto value : op.getResults()) {
+            auto type = llvm::cast<mlir::RankedTensorType>(value.getType());
+            if (type.getRank() == 0) continue;
+            if (type.getRank() != 2 || type.getDimSize(0) != s.m)
+                return module.emitError("unexpected row-carrying value");
+            value.setType(mlir::RankedTensorType::get(
+                {capacity, type.getDimSize(1)}, type.getElementType()));
+        }
+    }
+    llvm::SmallVector<mlir::Type> inputs(function.getArgumentTypes());
+    inputs[0] = capacity_type;
+    function.setType(builder.getFunctionType(inputs, {capacity_type}));
+    contracts::FFNCompileSpec target = source;
+    target.shape.m = capacity;
+    llvm::json::Array target_ops;
+    if (mlir::failed(VerifyModule(module)) ||
+        mlir::failed(NormalizeFFN(module, target, target_ops))) return mlir::failure();
+
+    // Retain an executable standard-StableHLO equivalence witness. The host
+    // implements these same two boundary operations; only the shared B-row
+    // core is compiled/cached, so logical M does not fragment code identity.
+    mlir::OwningOpRef<mlir::ModuleOp> boundary(llvm::cast<mlir::ModuleOp>(module->clone()));
+    auto wrapper = boundary->lookupSymbol<mlir::func::FuncOp>(contracts::kFFNEntryPoint);
+    auto arg = wrapper.getArgument(0);
+    arg.setType(logical_type);
+    inputs[0] = logical_type;
+    wrapper.setType(builder.getFunctionType(inputs, {logical_type}));
+    builder.setInsertionPointToStart(&wrapper.front());
+    const auto loc = builder.getUnknownLoc();
+    const auto scalar = mlir::RankedTensorType::get({}, builder.getF32Type());
+    auto zero = builder.create<hlo::ConstantOp>(
+        loc, mlir::DenseElementsAttr::get(scalar, builder.getF32FloatAttr(0.0)));
+    auto pad = builder.create<hlo::PadOp>(
+        loc, capacity_type, arg, zero, builder.getDenseI64ArrayAttr({0, 0}),
+        builder.getDenseI64ArrayAttr({capacity - s.m, 0}), builder.getDenseI64ArrayAttr({0, 0}));
+    arg.replaceAllUsesExcept(pad.getResult(), pad.getOperation());
+    auto ret = llvm::cast<mlir::func::ReturnOp>(wrapper.front().getTerminator());
+    builder.setInsertionPoint(ret);
+    auto crop = builder.create<hlo::SliceOp>(
+        loc, logical_type, ret.getOperand(0), builder.getDenseI64ArrayAttr({0, 0}),
+        builder.getDenseI64ArrayAttr({s.m, s.d}), builder.getDenseI64ArrayAttr({1, 1}));
+    ret.setOperand(0, crop.getResult());
+    if (mlir::failed(VerifyModule(*boundary))) return mlir::failure();
+    if (mlir::failed(WriteMetadata(module, plan_path, llvm::json::Object{
+            {"schema", "coral.ffn.optimization-plan.v1"}, {"pass", "P2-token-row-bucket"},
+            {"logical_m", s.m}, {"capacity_m", capacity}, {"d", s.d}, {"f", s.f},
+            {"weight_abi", contracts::FFNAbi(source)},
+            {"pad", llvm::json::Object{{"low", llvm::json::Array{0, 0}},
+                {"high", llvm::json::Array{capacity - s.m, 0}}, {"value", 0.0}}},
+            {"crop", llvm::json::Object{{"start", llvm::json::Array{0, 0}},
+                {"limit", llvm::json::Array{s.m, s.d}}, {"strides", llvm::json::Array{1, 1}}}},
+            {"proof", "admitted FFN has independent token rows; no reduction or feature axis padding"}})))
+        return mlir::failure();
+    if (mlir::failed(WriteModule(*boundary, boundary_path))) return mlir::failure();
+    return WriteModule(module, core_path);
+}
+
 mlir::LogicalResult BindFFNReflection(mlir::ModuleOp module, llvm::StringRef reflection,
                                       llvm::StringRef output) {
     auto function = module.lookupSymbol<mlir::func::FuncOp>(contracts::kFFNEntryPoint);

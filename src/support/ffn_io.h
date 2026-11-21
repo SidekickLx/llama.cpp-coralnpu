@@ -18,6 +18,7 @@ struct FFNRunnerOptions {
     contracts::FFNWeightLayout weight_layout = contracts::FFNWeightLayout::Native;
     std::vector<std::string> inputs;
     std::string output;
+    std::size_t capacity_m = 0; // Zero keeps the exact input profile.
     std::size_t repeat = 3;
     std::size_t recreate = 1;
     bool help = false;

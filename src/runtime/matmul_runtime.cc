@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <new>
@@ -797,6 +798,34 @@ std::vector<float> FFNModule::Run(TensorBinding activation, const PreparedFFNWei
         owner.poisoned = true;
         throw;
     }
+}
+
+
+std::vector<float> FFNModule::RunRows(TensorBinding activation,
+                                    const PreparedFFNWeights &weights) {
+    if (!state_ || !weights.state_)
+        throw std::invalid_argument("cannot use a moved-from FFN module or weights");
+    const auto &shape = state_->ffn.shape;
+    if (!activation.rows || activation.rows > static_cast<std::size_t>(shape.m))
+        throw std::invalid_argument("logical FFN rows exceed compiled capacity");
+    activation.Validate(activation.rows, shape.d);
+    if (activation.rows == static_cast<std::size_t>(shape.m)) return Run(activation, weights);
+    const auto prepare_start = Clock::now();
+    // A fresh zeroed tail is required for every invocation, including decreasing
+    // M on a reused graph. Pooling this staging storage is a separate M6 task.
+    std::vector<float> padded(static_cast<std::size_t>(shape.m * shape.d), 0.0f);
+    std::memcpy(padded.data(), activation.data, activation.element_count * sizeof(float));
+    const auto prepare_end = Clock::now();
+    auto output = Run(TensorBinding::Dense(padded, shape.m, shape.d), weights);
+    const auto crop_start = Clock::now();
+    output.resize(activation.element_count);
+    auto &stats = state_->device->counters;
+    stats.ffn_padded_rows += shape.m - activation.rows;
+    stats.ffn_cropped_rows += shape.m - activation.rows;
+    stats.ffn_boundary_ms +=
+        std::chrono::duration<double, std::milli>(prepare_end - prepare_start).count() +
+        std::chrono::duration<double, std::milli>(Clock::now() - crop_start).count();
+    return output;
 }
 
 } // namespace coral::runtime

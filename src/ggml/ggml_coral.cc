@@ -34,8 +34,9 @@ using WeightKey = std::tuple<std::uintptr_t, std::uintptr_t, std::size_t, std::s
 struct FFNCatalogEntry {
     std::string directory;
     contracts::FFNWeightLayout layout = contracts::FFNWeightLayout::Native;
+    std::int64_t capacity_m = 0;
 };
-using FFNModuleKey = std::tuple<std::int64_t, std::int64_t, std::int64_t, contracts::FFNWeightLayout>;
+using FFNModuleKey = std::tuple<std::int64_t, std::int64_t, std::int64_t, contracts::FFNWeightLayout, std::string>;
 struct Registration {
     Options options;
     std::unique_ptr<jit::FFNJitClient> jit_client;
@@ -102,6 +103,9 @@ void Accumulate(const RuntimeStats &before, const RuntimeStats &after) {
     sum.binding_allocations += after.binding_allocations - before.binding_allocations;
     sum.upload_bytes += after.upload_bytes - before.upload_bytes;
     sum.download_bytes += after.download_bytes - before.download_bytes;
+    sum.ffn_padded_rows += after.ffn_padded_rows - before.ffn_padded_rows;
+    sum.ffn_cropped_rows += after.ffn_cropped_rows - before.ffn_cropped_rows;
+    sum.ffn_boundary_ms += after.ffn_boundary_ms - before.ffn_boundary_ms;
     sum.module_load_ms += after.module_load_ms - before.module_load_ms;
     sum.invoke_ms += after.invoke_ms - before.invoke_ms;
 }
@@ -188,6 +192,7 @@ struct BackendContext {
         const auto aot = registration.ffn_artifacts.find(Key(plan.shape));
         if (aot != registration.ffn_artifacts.end()) {
             spec.weight_layout = aot->second.layout;
+            spec.shape.m = aot->second.capacity_m;
         } else {
             if (!registration.jit_client) {
                 const auto start = std::chrono::steady_clock::now();
@@ -199,7 +204,8 @@ struct BackendContext {
             }
             spec = registration.jit_client->Specification(plan.shape);
         }
-        const FFNModuleKey key{spec.shape.m, spec.shape.d, spec.shape.f, spec.weight_layout};
+        const FFNModuleKey key{spec.shape.m, spec.shape.d, spec.shape.f, spec.weight_layout,
+            aot == registration.ffn_artifacts.end() ? "jit" : aot->second.directory};
         auto module = ffn_modules.find(key);
         if (module == ffn_modules.end()) {
             // A listed but corrupt package remains a deployment error.
@@ -263,7 +269,7 @@ struct BackendContext {
             ++registration.stats.ffn_weight_preparations;
         }
         const auto before = device.stats();
-        const auto output = module->second->Run(bindings[0], *prepared);
+        const auto output = module->second->RunRows(bindings[0], *prepared);
         // Execution occurs at the first member; the contiguous region has no
         // observable intermediates. Publish Y only after the whole call passes.
         std::memcpy(destination->data, output.data(), output.size() * sizeof(float));
@@ -703,9 +709,11 @@ std::map<FFNKey, FFNCatalogEntry> ReadFFNArtifacts(const std::string &directory)
     }
     std::ifstream input(root / "ffn.tsv");
     std::string line;
-    if (!std::getline(input, line) || line != "coral-m4-ffn-v1") {
+    if (!std::getline(input, line) ||
+        (line != "coral-m4-ffn-v1" && line != "coral-m5-ffn-v2")) {
         throw std::runtime_error("invalid FFN catalog header");
     }
+    const bool bucket_catalog = line == "coral-m5-ffn-v2";
     while (std::getline(input, line)) {
         if (line.empty() || line[0] == '#') {
             continue;
@@ -716,18 +724,27 @@ std::map<FFNKey, FFNCatalogEntry> ReadFFNArtifacts(const std::string &directory)
         if (!(fields >> spec.shape.m >> spec.shape.d >> spec.shape.f >> dirname)) {
             throw std::runtime_error("invalid FFN catalog row");
         }
-        if (fields >> extra) {
-            if (extra == "transposed") spec.weight_layout = contracts::FFNWeightLayout::Transposed;
-            else if (extra != "native") throw std::runtime_error("invalid FFN catalog layout");
-            if (fields >> extra) throw std::runtime_error("invalid FFN catalog row");
+        std::int64_t capacity = spec.shape.m;
+        if (bucket_catalog) {
+            if (!(fields >> extra >> capacity))
+                throw std::runtime_error("bucket catalog requires layout and capacity");
+        } else {
+            if (!(fields >> extra)) extra = "native";
         }
+        if (extra == "transposed") spec.weight_layout = contracts::FFNWeightLayout::Transposed;
+        else if (extra != "native") throw std::runtime_error("invalid FFN catalog layout");
+        if (fields >> extra) throw std::runtime_error("invalid FFN catalog row");
         contracts::ValidateFFNSpec(spec);
+        if (capacity < spec.shape.m) throw std::runtime_error("bucket catalog truncates rows");
+        auto compiled = spec;
+        compiled.shape.m = capacity;
+        contracts::ValidateFFNSpec(compiled);
         const std::filesystem::path path(dirname);
         if (path.filename() != path || path == "." || path == ".." ||
             std::filesystem::is_symlink(root / path) || !std::filesystem::is_directory(root / path)) {
             throw std::runtime_error("FFN profile must name a local package directory");
         }
-        if (!result.emplace(Key(spec.shape), FFNCatalogEntry{(root / path).string(), spec.weight_layout}).second) {
+        if (!result.emplace(Key(spec.shape), FFNCatalogEntry{(root / path).string(), spec.weight_layout, capacity}).second) {
             throw std::runtime_error("duplicate FFN profile");
         }
     }

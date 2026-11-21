@@ -49,6 +49,11 @@ class FFNModule {
     // poisons the shared context and returns no partial result or CPU replay.
     std::vector<float> Run(TensorBinding activation, const PreparedFFNWeights &);
 
+    // Explicit FFN-only boundary adapter: accept 1 <= logical M <= compiled M,
+    // zero-pad X's token rows and crop Y to logical M. Feature/reduction axes
+    // are unchanged. Run() keeps its original exact-shape validation.
+    std::vector<float> RunRows(TensorBinding activation, const PreparedFFNWeights &);
+
   private:
     std::unique_ptr<detail::ModuleState> state_;
 };

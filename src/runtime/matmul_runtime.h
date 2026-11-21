@@ -52,6 +52,10 @@ struct RuntimeStats {
     // Logical host <-> HAL copies, NOT MPACT DDR/TCM traffic.
     std::uint64_t upload_bytes = 0;
     std::uint64_t download_bytes = 0;
+    // Host FFN row-boundary work, separate from VM invocation and simulator
+    // traffic. Count only successfully completed padded invocations.
+    std::uint64_t ffn_padded_rows = 0, ffn_cropped_rows = 0;
+    double ffn_boundary_ms = 0.0;
     double module_load_ms = 0.0;
     double invoke_ms = 0.0;
 };

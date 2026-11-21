@@ -206,7 +206,15 @@ struct FFNJitClient::State {
                 JSON::parse(artifacts::DescribeFFNJSON(tiny)).at("compiler_options"),
                 "JIT compiler options mismatch");
         json::Integer(config.at("timeout_seconds"), 1, 600);
-        json::Keys(config.at("optimization"), {"weight_layout"});
+        json::Keys(config.at("optimization"), {"weight_layout", "m_buckets"});
+        const auto &buckets = config.at("optimization").at("m_buckets");
+        Require(buckets.is_array() && buckets.size() <= 16, "invalid M bucket policy");
+        std::int64_t previous = 0;
+        for (const auto &value : buckets) {
+            const auto capacity = json::Integer(value, 1, 2147483647 / 4);
+            Require(capacity > previous, "M buckets must be strictly increasing");
+            previous = capacity;
+        }
         const auto layout = config.at("optimization").at("weight_layout");
         Require(layout == "native" || layout == "transposed", "unknown JIT weight layout");
         const auto &paths = config.at("paths");
@@ -273,6 +281,13 @@ FFNJitClient::~FFNJitClient() = default;
 contracts::FFNCompileSpec FFNJitClient::Specification(contracts::FFNShape shape) const {
     contracts::FFNCompileSpec spec;
     spec.shape = shape;
+    for (const auto &value : state_->config.at("optimization").at("m_buckets")) {
+        const auto capacity = value.get<std::int64_t>();
+        if (shape.m <= capacity) {
+            spec.shape.m = capacity;
+            break;
+        }
+    }
     if (state_->config.at("optimization").at("weight_layout") == "transposed")
         spec.weight_layout = contracts::FFNWeightLayout::Transposed;
     contracts::ValidateFFNSpec(spec);

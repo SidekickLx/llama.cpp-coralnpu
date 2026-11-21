@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 from region_cache import RegionCache, identity_hash, read_json
-from region_service import Toolchain, optimize_region, invoke, require
+from region_service import Toolchain, optimize_region, specialize_rows, select_row_capacity, invoke, require
 from ffn_artifact import write_json
 
 
@@ -17,12 +17,13 @@ def configure(args):
     output = args.output.absolute()
     output.parent.mkdir(parents=True, exist_ok=True)
     require(1 <= args.timeout <= 600, "timeout must be in [1,600] seconds")
+    select_row_capacity(1, args.m_buckets)
     write_json(output, {"schema": "coral.ffn.jit-config.v1",
                        "cache": str(cache.root),
                        "environment": cache.environment, "paths": cache.paths,
                        "environment_sha256": identity_hash(cache.environment),
                        "timeout_seconds": args.timeout,
-                       "optimization": {"weight_layout": args.weight_layout}})
+                       "optimization": {"weight_layout": args.weight_layout, "m_buckets": args.m_buckets}})
     print(json.dumps({"status": "configured", "configuration": str(output),
                       "environment_sha256": identity_hash(cache.environment)}))
 
@@ -33,7 +34,7 @@ def compile_request(args):
     require(identity_hash(config["environment"]) == config["environment_sha256"],
             "JIT environment digest mismatch")
     optimization = config["optimization"]
-    require(set(optimization) == {"weight_layout"} and
+    require(set(optimization) == {"weight_layout", "m_buckets"} and
             optimization["weight_layout"] in ("native", "transposed"), "invalid optimization policy")
     layout = optimization["weight_layout"]
     paths = config["paths"]
@@ -52,12 +53,16 @@ def compile_request(args):
     request_key = identity_hash(request)
     snapshot = request["snapshot"]
     profile = snapshot["shape"]
+    capacity = select_row_capacity(profile[0], optimization["m_buckets"])
     tools.describe(profile)
     write_json(work / "snapshot.json", snapshot)
     invoke([tools.tool, "import-ggml-ffn", work / "snapshot.json", work / "imported.mlir"],
            work, "import")
     canonical = optimize_region((work / "imported.mlir").read_bytes(), profile, layout,
                                 toolchain=tools, evidence=work / "normalization")
+    if optimization["m_buckets"]:
+        canonical, profile = specialize_rows(canonical, profile, capacity, layout,
+                                             toolchain=tools, evidence=work / "rows")
     description = tools.describe(profile, layout)
     result = cache.resolve(canonical, profile, description["compatibility"],
                            description["contract"]["numeric_policy"], weight_layout=layout)
@@ -85,6 +90,7 @@ def main():
     setup.add_argument("--output", type=Path, required=True)
     setup.add_argument("--timeout", type=int, default=600)
     setup.add_argument("--weight-layout", choices=("native", "transposed"), default="native")
+    setup.add_argument("--m-buckets", type=int, nargs="+", default=[])
     defaults = Toolchain()
     for name in ("tool", "checker", "compiler"):
         setup.add_argument("--" + name, type=Path, default=getattr(defaults, name))

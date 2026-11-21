@@ -4,7 +4,7 @@
 import argparse
 from pathlib import Path
 import tempfile
-from region_service import ROOT, Toolchain, optimize_region, compile_region, require
+from region_service import ROOT, Toolchain, optimize_region, specialize_rows, select_row_capacity, compile_region, require
 
 
 def main():
@@ -14,6 +14,7 @@ def main():
     for name in ("m", "d", "f"):
         parser.add_argument("--" + name, type=int, required=True)
     parser.add_argument("--weight-layout", choices=("native", "transposed"), default="native")
+    parser.add_argument("--m-buckets", type=int, nargs="+", default=[])
     defaults = Toolchain()
     for name in ("tool", "checker", "compiler"):
         parser.add_argument("--" + name, type=Path, default=getattr(defaults, name))
@@ -26,6 +27,10 @@ def main():
     description = toolchain.describe(profile, args.weight_layout)
     canonical = optimize_region(args.input.read_bytes(), profile, args.weight_layout,
                                     toolchain=toolchain, evidence=evidence / "normalization")
+    capacity = select_row_capacity(args.m, args.m_buckets)
+    if args.m_buckets:
+        canonical, profile = specialize_rows(canonical, profile, capacity, args.weight_layout,
+                                             toolchain=toolchain, evidence=evidence / "rows")
     output = compile_region(canonical, profile, description["compatibility"],
                             description["contract"]["numeric_policy"],
                             output=args.output, toolchain=toolchain, weight_layout=args.weight_layout)

@@ -57,6 +57,7 @@ LogicalResult CheckProgram(ModuleOp module, func::FuncOp function) {
         if (++operations > 1024 || !llvm::isa<
                 hlo::ConstantOp, hlo::DotGeneralOp, hlo::BroadcastInDimOp,
                 hlo::NegOp, hlo::ExpOp, hlo::AddOp, hlo::DivOp, hlo::MulOp,
+                hlo::PadOp, hlo::SliceOp,
                 func::ReturnOp>(operation)) {
             return operation.emitError("operation is outside the M3 reference subset");
         }

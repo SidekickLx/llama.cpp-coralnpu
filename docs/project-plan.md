@@ -304,7 +304,10 @@ and opt-in synchronous FFN compiler worker are connected to GGML execution.
 A cold real-model run compiles the two exact FFN profiles once each; a new
 process reuses both artifacts without launching a child process. P1 is also implemented and accepted (versioned prepared-weight ABI, explicit
 weight invalidation, official-reference/Coral/model and JIT matrix checks).
-P2 remains pending. See [optimization evidence](m5-optimization-test-report.md). See [architecture](m5-jit.md) and [acceptance evidence](m5-jit-test-report.md).
+P2 is implemented and accepted for independent FFN token rows, with standard
+Pad/Core/Crop reference evidence, bucket reuse and boundary rejection tests.
+The final combined regression/performance audit is in progress.
+See [optimization evidence](m5-optimization-test-report.md). See [architecture](m5-jit.md) and [acceptance evidence](m5-jit-test-report.md).
 Member capability and fusion legality still gate JIT; the pinned llama.cpp
 checkout remains unmodified.
 

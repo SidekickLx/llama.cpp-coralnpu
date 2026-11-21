@@ -69,3 +69,72 @@ also discards MPACT's lower-level read-only binding cache, including stale
 entries whose host addresses could otherwise be reused. Recompilation is not
 needed; validated code remains reusable from disk. The backend remains
 single-threaded and a failed graph cannot be revived by invalidation.
+
+## P2: token-row capacities
+
+A strictly increasing list of at most 16 positive `--m-buckets` chooses the
+smallest capacity B >= actual M. An empty list keeps exact specialization.
+M above the largest configured bucket falls back to exact compilation; it is
+never truncated. The normal signed-32-bit tensor-byte bounds still apply to B.
+For example, `[1,4,8]` maps M=3 to B=4, M=5/7 to B=8 and M=9 to B=9.
+
+The pass first admits the entire actual FFN graph, proving that dot reductions
+use feature dimensions and all other operations are scalar broadcasts or
+elementwise operations. It changes only X and row-carrying SSA result types to
+B rows, then runs MLIR verification and full FFN admission again. Weight shapes,
+D, F, operation order and numeric policy stay unchanged. A well-typed graph
+that mixes token rows is rejected. This proof does not apply to attention or
+to padding reduction/feature dimensions.
+
+The execution boundary is:
+
+```text
+X[M,D] -- zero-pad token rows --> X[B,D]
+    -- compiled FFN[B,D,F] --> Y[B,D] -- crop first M rows --> Y[M,D]
+```
+
+`specialize_rows(...)` retains:
+- `before.mlir`: admitted logical-M core, after any P1 conversion.
+- `core.mlir`: canonical B-row program actually compiled and cached.
+- `boundary.mlir`: one standard StableHLO function containing Pad/Core/Slice,
+  evaluated by the official interpreter as an equivalence witness.
+- `plan.json`: explicit row counts, pad value, crop bounds and proof scope.
+
+`FFNModule::RunRows` implements these boundary operations on the host.
+`Run` retains its original exact-shape checks. Each padded call initializes
+a fresh zero tail, uploads the full B-row input and downloads the full B-row
+output before cropping. This is not a device-transfer reduction. Boundary
+time and padded/cropped rows are counted separately from VM invocation time.
+
+The artifact ABI describes the **compiled capacity**, not the current M.
+No new computational ABI is necessary: an exact B-row artifact is the same
+mathematical program as the bucket core. Canonical keys include B, D, F,
+physical weight ABI and core IR. Request indexes also include the complete
+bucket policy and logical GGML snapshot. Different policies selecting the same
+core can share its canonical package; different M values sharing B reuse
+one loaded JIT module. Explicit AOT package paths are separate module keys,
+so a different listed package cannot bypass its own validation.
+
+Enable both passes for JIT:
+
+```bash
+python compiler/jit_worker.py configure --cache build/ffn-cache \
+  --output build/jit-p1-p2.json --weight-layout transposed --m-buckets 1 4 8
+```
+
+For AOT, pass the same `--m-buckets` option to `compile_ffn.py`; use the selected
+capacity with the standalone runner's `--capacity-m B`. Its tensor JSON and
+returned output still have the logical M. A bucket-aware GGML catalog is
+explicitly versioned; each row is `logical-M D F directory layout capacity-M`:
+
+```text
+coral-m5-ffn-v2
+1 64 172 shared-capacity-8 transposed 8
+5 64 172 shared-capacity-8 transposed 8
+```
+
+This coarse example tests sharing, not a recommended decode policy. Padding
+M=1 to B=8 can increase execution work substantially. Exact specialization is
+the default. `[1,4,8]` keeps decode exact while allowing prefill sharing.
+GGML's existing member capability, scheduler and fusion guards still apply;
+a bucket policy does not add support for arbitrary graph operations or shapes.

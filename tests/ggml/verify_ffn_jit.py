@@ -27,9 +27,13 @@ def main():
     parser.add_argument("--matmuls", type=Path, required=True)
     parser.add_argument("--pointwise", type=Path, required=True)
     parser.add_argument("--aot", type=Path, required=True)
+    parser.add_argument("--m-buckets", type=int, nargs="+", default=[])
     parser.add_argument("--weight-layout", choices=("native", "transposed"), default="native")
     parser.add_argument("--model", type=Path, default=ROOT / "models/stories260K-f32.gguf")
     args = parser.parse_args()
+    from region_service import select_row_capacity
+    capacities = {m: select_row_capacity(m, args.m_buckets) for m in (1, 5)}
+    profile_count = len(set(capacities.values()))
     revision = require_clean()
     work = Path(tempfile.mkdtemp(prefix="m5-jit-", dir=ROOT / "build"))
     print(f"Evidence: {work}", flush=True)
@@ -59,7 +63,8 @@ def main():
 
     command("configure", [sys.executable, ROOT / "compiler/jit_worker.py", "configure",
                          "--cache", work / "cache", "--output", config_path,
-                         "--weight-layout", args.weight_layout])
+                         "--weight-layout", args.weight_layout,
+                         *(["--m-buckets", *args.m_buckets] if args.m_buckets else [])])
     command("cpu", [runner, "--mode", "cpu", "--model", args.model, "--output", work / "cpu"])
     _, reference = read_run(work / "cpu", "cpu")
     tokens = work / "cpu/tokens.txt"
@@ -72,24 +77,25 @@ def main():
             require(not (work / label / "summary.json").exists(), "failure published completion")
             return result
         summary, values = read_run(work / label, "coral")
-        inspect_regions(work / label, 20, {1: 3, 5: 3} if args.weight_layout == "transposed" else None)
+        inspect_regions(work / label, 20, {m: (6 if args.weight_layout == "native" and b == 1 else 3)
+                                              for m, b in capacities.items()})
         require(summary["stats"]["matmuls"] == 84 and summary["stats"]["calls_completed"] == 104,
                 "missing mixed matmul/FFN execution")
-        require(summary["stats"]["ffn_module_cache_hits"] == 18 and
+        require(summary["stats"]["ffn_module_cache_hits"] == 20 - profile_count and
                 summary["stats"]["ffn_weight_preparations"] == 5 and
                 summary["stats"]["ffn_weight_cache_hits"] == 15, "module/weight reuse failed")
         return summary["stats"], values
 
     cold, actual = inference("cold", trace=True)
-    require(cold["jit_compilations"] == cold["jit_worker_launches"] == cold["jit_requests"] == 2,
-            "two exact profiles must compile once each")
+    require(cold["jit_compilations"] == cold["jit_worker_launches"] == cold["jit_requests"] == profile_count,
+            "each compiled capacity must compile once")
     require(cold["jit_disk_hits"] == 0, "cold run unexpectedly hit")
     error = compare(actual, reference)
     warm, reloaded = inference("warm", trace=True)
     require(warm["jit_compilations"] == warm["jit_worker_launches"] == 0 and
-            warm["jit_disk_hits"] == warm["jit_requests"] == 2, "fresh-process cache hit failed")
+            warm["jit_disk_hits"] == warm["jit_requests"] == profile_count, "fresh-process cache hit failed")
     require(actual == reloaded, "persistent reload changed logits")
-    for label, workers, compiles in (("cold", 2, 2), ("warm", 0, 0)):
+    for label, workers, compiles in (("cold", profile_count, profile_count), ("warm", 0, 0)):
         trace = (work / (label + ".exec.trace")).read_text()
         launches = [line for line in trace.splitlines() if "execve(" in line]
         require("execveat(" not in trace, "unexpected descriptor execution")
@@ -114,21 +120,23 @@ def main():
             changed_stats["jit_worker_launches"] == 0, "activation change triggered compilation/stale output")
 
     entries = list((work / "cache/entries").iterdir())
-    require(len(entries) == 2, "unexpected canonical entries")
+    require(len(entries) == profile_count, "unexpected canonical entries")
     for entry in entries:
         identity = json.loads((entry / "cache.json").read_text())
         shape = identity["profile"]
         original = args.aot / ("real-decode" if shape["m"] == 1 else "real-prefill")
         old = json.loads((original / "manifest.json").read_text())
-        expected_semantic = old["program"]["semantic_sha256"]
-        if args.weight_layout == "transposed":
-            from region_service import Toolchain, optimize_region
-            from ffn_artifact import digest
-            transformed = optimize_region((original / "region.stablehlo.mlir").read_bytes(),
-                                          (shape["m"], shape["d"], shape["f"]), "transposed",
-                                          toolchain=Toolchain(), evidence=work / ("aot-p1-" + str(shape["m"])))
-            expected_semantic = digest(transformed)
-        require(identity["semantic_sha256"] == expected_semantic,
+        from region_service import Toolchain, optimize_region, specialize_rows
+        from ffn_artifact import digest
+        original_shape = old["contract"]["shape"]
+        source_profile = tuple(original_shape[name] for name in ("m", "d", "f"))
+        transformed = optimize_region((original / "region.stablehlo.mlir").read_bytes(),
+                                      source_profile, args.weight_layout,
+                                      toolchain=Toolchain(), evidence=work / ("aot-p1-" + str(shape["m"])))
+        if args.m_buckets:
+            transformed, _ = specialize_rows(transformed, source_profile, shape["m"], args.weight_layout,
+                                             toolchain=Toolchain(), evidence=work / ("aot-p2-" + str(shape["m"])))
+        require(identity["semantic_sha256"] == digest(transformed),
                 "JIT import differs from accepted AOT semantics")
     victim = entries[0]
     (victim / "region.vmfb").write_bytes(b"deliberately corrupt cached program")
@@ -195,7 +203,7 @@ def main():
             require(row["jit_requests"] == 0, "ineligible region reached JIT")
     command("boundary-worker-failure", [boundary_runner, "jit-failure", catalog,
                                        work / "worker-failure.json"])
-    require(len(list((work / "cache/entries").iterdir())) == 2,
+    require(len(list((work / "cache/entries").iterdir())) == profile_count,
             "equivalent GGML spellings created redundant canonical artifacts")
 
     require_clean()
@@ -203,8 +211,9 @@ def main():
               "cold": cold, "warm": warm, "changed_activation": changed_stats,
               "repaired": repaired, "index_repair": repaired_index,
               "max_abs_vs_cpu": error, "changed_max_abs_vs_cpu": changed_error,
-              "checks": checks, "canonical_profiles": 2,
-              "cold_worker_execs": 2, "cold_compiler_execs": 2,
+              "checks": checks, "canonical_profiles": profile_count, "m_buckets": args.m_buckets,
+              "weight_layout": args.weight_layout,
+              "cold_worker_execs": profile_count, "cold_compiler_execs": profile_count,
               "warm_child_execs": 0, "runner_sha256": file_digest(runner)}
     (work / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({"status": "passed", "report": str(work / "report.json"),

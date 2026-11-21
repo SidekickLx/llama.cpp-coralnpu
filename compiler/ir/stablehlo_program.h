@@ -17,6 +17,9 @@ mlir::LogicalResult PrepareFFNAOT(mlir::ModuleOp, const contracts::FFNCompileSpe
                                   llvm::StringRef ir_path, llvm::StringRef metadata_path);
 mlir::LogicalResult OptimizeFFN(mlir::ModuleOp, const contracts::FFNCompileSpec &,
                                 llvm::StringRef ir_path, llvm::StringRef plan_path);
+mlir::LogicalResult SpecializeFFNRows(mlir::ModuleOp, const contracts::FFNCompileSpec &,
+                                      int64_t capacity, llvm::StringRef core_path,
+                                      llvm::StringRef boundary_path, llvm::StringRef plan_path);
 mlir::LogicalResult BindFFNReflection(mlir::ModuleOp, llvm::StringRef reflection,
                                       llvm::StringRef output);
 void RegisterDialects(mlir::MLIRContext &context);

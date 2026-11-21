@@ -52,3 +52,56 @@ without recompilation, corrupt artifact recovery, index repair, stale environmen
 rejection, worker failure/timeout including descendant termination, and all
 scheduler boundary regressions. Run `tests/ggml/verify_ffn_jit.py` with the
 existing catalog arguments plus `--weight-layout transposed` to reproduce.
+
+## P2: token-row bucket specialization
+
+Independent evidence: `build/m5-p2-gbeyani2/report.json`. The 20 cases cover
+both weight layouts, M=1/2/3/4/5/7/8/9 with policy `[1,4,8]` at D=3,F=4,
+and captured real-model M=1/5 at D=64,F=172 with B=8. All 20 Pad/Core/Crop
+witnesses produced bit-identical official-reference results to their unpadded
+programs. Coral-versus-CPU maximum absolute error was `8.34465e-7`.
+
+Twenty requests produced ten canonical artifacts; the other ten reused them.
+Same-capacity cores were byte-identical across logical M. A single live module
+and weight snapshot also passed growing/shrinking rows `8,1,7,2,5,1` and a
+subsequent changed-weight preparation, in both layouts. The suite includes
+26 negative checks: invalid policies, truncation, a **well-typed row-mixing dot**
+and runtime binding/layout/context violations. No attention or feature-axis
+padding is admitted.
+
+Real-model JIT evidence: `build/m5-jit-45qox56d/report.json`. With P1 and a
+deliberately coarse `[8]` policy, 20 FFN calls share one compiled capacity:
+one cold worker/compiler invocation, one fresh-process disk hit, zero warm
+child executions, 19 loaded-module hits, five weight preparations and 15 weight
+hits. Logit error versus CPU is `9.53674e-6`. Cache corruption/index repair,
+stale environment, worker failure/timeout and scheduler guards all pass.
+
+The trace has **four M=5 FFNs and sixteen M=1 FFNs**: llama.cpp prunes the
+last prefill layer to the last token. Thus B=8 pads/crops 124 rows over these
+20 calls. It uploads/downloads 31,744 additional logical bytes in each
+direction versus exact execution. This policy reduces compilation diversity
+but increases device work; it is a reuse stress case, not the default.
+
+Reproduce the independent and full JIT gates with:
+
+```bash
+python tests/compiler/verify_ffn_buckets.py \
+  --real-fixtures build/m3-model-ffn-results/model-ffn-1k4vkadq
+python tests/ggml/verify_ffn_jit.py \
+  --matmuls build/m2-artifacts/model-aot-c2u8iuxg \
+  --pointwise build/m3-pointwise-artifacts/pointwise-xc76cmwd \
+  --aot build/m4-aot-results/aot-cvoknmn_ \
+  --weight-layout transposed --m-buckets 8
+```
+
+The versioned AOT catalog also passed `tests/ggml/verify_ffn_bucket_backend.py`:
+`build/m5-p2-backend-6g14nlkn/report.json`. It reuses one B=8 module without
+reading the deliberately nonexistent JIT configuration. Mutable/immutable/
+generation changes, external consumers/views and evaluation callbacks pass.
+Seven malformed catalogs are rejected. A different, corrupt package listed
+for M=1 is still validated after four healthy M=5 FFNs; an existing same-capacity
+module cannot conceal the error. No final inference report is published.
+
+The public AOT CLI with `--m-buckets 1 8` and standalone runner with
+`--capacity-m 8` also passed three invocations, retaining
+`build/m5-p2-cli-artifact` and `build/m5-p2-cli-run.json`.

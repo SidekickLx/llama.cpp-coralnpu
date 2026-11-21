@@ -224,6 +224,10 @@ void WriteStats(std::ostream &out, const adapter::Stats &after, const adapter::S
         << ",\"failed_dispatches\":" << a.failed_dispatches - b.failed_dispatches
         << ",\"observer_errors\":" << a.observer_errors - b.observer_errors
         << ",\"binding_allocations\":" << a.binding_allocations - b.binding_allocations
+        << ",\"ffn_padded_rows\":" << a.ffn_padded_rows - b.ffn_padded_rows
+        << ",\"ffn_cropped_rows\":" << a.ffn_cropped_rows - b.ffn_cropped_rows
+        << ",\"ffn_boundary_ms\":" << a.ffn_boundary_ms - b.ffn_boundary_ms
+        << ",\"weight_cache_resets\":" << after.weight_cache_resets - before.weight_cache_resets
         << ",\"logical_upload_bytes\":" << a.upload_bytes - b.upload_bytes
         << ",\"logical_download_bytes\":" << a.download_bytes - b.download_bytes
         << ",\"module_load_ms\":" << a.module_load_ms - b.module_load_ms

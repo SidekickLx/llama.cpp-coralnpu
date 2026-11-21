@@ -106,6 +106,32 @@ def optimize_region(source, profile, weight_layout, *, toolchain, evidence):
     return (evidence / "after.mlir").read_bytes()
 
 
+def select_row_capacity(rows, buckets):
+    require(type(rows) is int and rows > 0, "invalid logical M")
+    require(isinstance(buckets, list) and len(buckets) <= 16 and
+            all(type(value) is int and 0 < value <= 2147483647 // 4 for value in buckets) and
+            buckets == sorted(set(buckets)), "M buckets must be strictly increasing positive integers")
+    for capacity in buckets:
+        if rows <= capacity:
+            return capacity
+    # An empty policy or a row count above the largest bucket stays exact.
+    return rows
+
+
+def specialize_rows(source, profile, capacity, weight_layout, *, toolchain, evidence):
+    """Compile a reusable B-row core; retain a verified Pad/Core/Crop witness."""
+    evidence = Path(evidence)
+    evidence.mkdir(parents=True, exist_ok=False)
+    require(type(capacity) is int and capacity >= profile[0], "bucket cannot truncate rows")
+    target_profile = (capacity, profile[1], profile[2])
+    toolchain.describe(target_profile, weight_layout)
+    (evidence / "before.mlir").write_bytes(source)
+    invoke([toolchain.paths()["tool"], "bucket-ffn", evidence / "before.mlir",
+            *profile, capacity, weight_layout, evidence / "core.mlir",
+            evidence / "boundary.mlir", evidence / "plan.json"], evidence, "specialize")
+    return (evidence / "core.mlir").read_bytes(), target_profile
+
+
 def compile_region(canonical_ir, profile, target, numeric_policy, *,
                    output, toolchain=None, weight_layout="native"):
     """The only FFN compilation pipeline, shared by AOT and JIT cache misses.
@@ -154,12 +180,12 @@ def compile_region(canonical_ir, profile, target, numeric_policy, *,
     invoke(command, work, "compile")
     affinities = json.loads((work / "affinity.json").read_text())["affinities"]
     count = 0
-    for target, profile in affinities.items():
-        require(profile["dynamic-dispatch-count"] == 0, "dynamic dispatch outside the static FFN contract")
-        if target == "coralnpu":
-            count += profile["dispatch-count"]
+    for target_name, affinity in affinities.items():
+        require(affinity["dynamic-dispatch-count"] == 0, "dynamic dispatch outside the static FFN contract")
+        if target_name == "coralnpu":
+            count += affinity["dispatch-count"]
         else:
-            require(profile["dispatch-count"] == 0, "numerical dispatch remained on " + target)
+            require(affinity["dispatch-count"] == 0, "numerical dispatch remained on " + target_name)
     require(count > 0, "no complete Coral dispatch placement")
     executables = []
     for source in sorted((work / "executables").glob("*.mlir")):
