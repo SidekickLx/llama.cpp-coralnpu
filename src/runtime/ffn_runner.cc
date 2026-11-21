@@ -28,6 +28,7 @@ int Run(int argc, char **argv) {
     if (options.help) {
         std::cout << "coral-ffn-runner --artifact DIRECTORY --inputs JSON [--inputs JSON ...]\n"
                      "                 --output NEW_JSON [--repeat 3] [--recreate 1]\n"
+                     "                 [--weight-layout native|transposed]\n"
                      "Inputs: positional M3 F32 tensor JSON (X, gate, up, down).\n"
                      "All cases must share an exact profile. Each gets independent weights.\n"
                      "Output is published only after every Coral execution check succeeds.\n"
@@ -37,7 +38,8 @@ int Run(int argc, char **argv) {
     const auto input_start = Clock::now();
     const auto inputs = ReadFFNCases(options.inputs);
     const double input_ms = Milliseconds(input_start);
-    const auto &spec = inputs.front().spec;
+    auto spec = inputs.front().spec;
+    spec.weight_layout = options.weight_layout;
     const auto &shape = spec.shape;
     std::vector<std::vector<float>> baselines(inputs.size());
     JSON cases = JSON::array();
@@ -103,6 +105,7 @@ int Run(int argc, char **argv) {
     }
     JSON report{{"schema", "coral.ffn.runner.v1"}, {"status", "passed"},
                 {"engine", "coral-mpact"}, {"program_sha256", program},
+                {"abi", coral::contracts::FFNAbi(spec)},
                 {"shape", {shape.m, shape.d, shape.f}}, {"repeat", options.repeat},
                 {"recreate", options.recreate}, {"input_read_ms", input_ms},
                 {"cases", std::move(cases)}, {"cycles", std::move(cycles)}};

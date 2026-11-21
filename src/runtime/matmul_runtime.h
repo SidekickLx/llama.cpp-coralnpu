@@ -73,6 +73,9 @@ class DeviceContext {
     DeviceContext &operator=(const DeviceContext &) = delete;
 
     RuntimeStats stats() const;
+    // Create a fresh healthy device. Existing modules/snapshots retain their
+    // original owner and must not be mixed with this new context.
+    void Reset();
 
   private:
     std::shared_ptr<detail::DeviceState> state_;

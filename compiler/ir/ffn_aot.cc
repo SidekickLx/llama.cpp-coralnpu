@@ -6,6 +6,8 @@
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/IR/PatternMatch.h"
+#include "stablehlo/dialect/StablehloOps.h"
 #include <map>
 #include <set>
 #include <vector>
@@ -77,7 +79,7 @@ struct Match {
         return true;
     }
 };
-bool FunctionAttributes(mlir::func::FuncOp function) {
+bool FunctionAttributes(mlir::func::FuncOp function, const contracts::FFNCompileSpec &spec) {
     for (auto attr : function->getAttrs()) {
         auto name = attr.getName().strref();
         if (name != "sym_name" && name != "function_type" && name != "sym_visibility" &&
@@ -87,7 +89,7 @@ bool FunctionAttributes(mlir::func::FuncOp function) {
     }
     auto abi = function->getAttrOfType<mlir::StringAttr>("coral.ffn_abi");
     auto policy = function->getAttrOfType<mlir::StringAttr>("coral.numeric_policy");
-    if (!abi || abi.getValue() != contracts::kFFNAbi ||
+    if (!abi || abi.getValue() != contracts::FFNAbi(spec) ||
         !policy || policy.getValue() != "f32_no_fast_math_v1") return false;
     const char *roles[] = {"activation", "gate_weight", "up_weight", "down_weight"};
     for (unsigned i = 0; i < 4; ++i) {
@@ -106,11 +108,9 @@ bool FunctionAttributes(mlir::func::FuncOp function) {
     }
     return true;
 }
-} // namespace
-
-mlir::LogicalResult PrepareFFNAOT(mlir::ModuleOp module,
+mlir::LogicalResult NormalizeFFN(mlir::ModuleOp module,
                                   const contracts::FFNCompileSpec &spec,
-                                  llvm::StringRef ir_path, llvm::StringRef metadata_path) {
+                                  llvm::json::Array &operations) {
     const auto &s = spec.shape;
     constexpr int64_t limit = 2147483647 / sizeof(float);
     if (s.m <= 0 || s.d <= 0 || s.f <= 0 || s.m > limit || s.d > limit ||
@@ -125,7 +125,7 @@ mlir::LogicalResult PrepareFFNAOT(mlir::ModuleOp module,
     if (!function || function.getName() != contracts::kFFNEntryPoint ||
         function.getFunctionType() != reference.getFunctionType() ||
         !function.isPublic() || !llvm::hasSingleElement(function.getBody()) ||
-        !FunctionAttributes(function))
+        !FunctionAttributes(function, spec))
         return module.emitError("FFN function contract mismatch");
     auto result = llvm::dyn_cast<mlir::func::ReturnOp>(function.getBody().front().getTerminator());
     auto golden = llvm::cast<mlir::func::ReturnOp>(reference.getBody().front().getTerminator());
@@ -135,7 +135,6 @@ mlir::LogicalResult PrepareFFNAOT(mlir::ModuleOp module,
         match.used.size() + 1 != function.getBody().front().getOperations().size())
         return module.emitError("program does not implement the admitted positional FFN semantics");
 
-    llvm::json::Array operations;
     for (auto *op : match.ordered) {
         llvm::json::Object record{{"index", static_cast<int64_t>(operations.size())},
                                   {"operation", op->getName().getStringRef()}};
@@ -170,17 +169,101 @@ mlir::LogicalResult PrepareFFNAOT(mlir::ModuleOp module,
     result->setLoc(mlir::UnknownLoc::get(module.getContext()));
     module->setLoc(mlir::UnknownLoc::get(module.getContext()));
     if (mlir::failed(VerifyModule(module))) return mlir::failure();
+    return mlir::success();
+}
+mlir::LogicalResult WriteMetadata(mlir::ModuleOp module, llvm::StringRef path,
+                                  llvm::json::Object value) {
     std::error_code error;
-    llvm::raw_fd_ostream metadata(metadata_path, error, llvm::sys::fs::CD_CreateNew,
-                                 llvm::sys::fs::FA_Write, llvm::sys::fs::OF_None);
-    if (error) return module.emitError("cannot create source metadata");
-    metadata << llvm::formatv("{0:2}", llvm::json::Value(llvm::json::Object{
-        {"schema", "coral.ffn.source-map.v1"}, {"operations", std::move(operations)}})) << '\n';
-    metadata.close();
-    if (metadata.has_error()) {
-        metadata.clear_error();
-        return module.emitError("cannot write source metadata");
+    llvm::raw_fd_ostream output(path, error, llvm::sys::fs::CD_CreateNew,
+                               llvm::sys::fs::FA_Write, llvm::sys::fs::OF_None);
+    if (error) return module.emitError("cannot create metadata");
+    output << llvm::formatv("{0:2}", llvm::json::Value(std::move(value))) << '\n';
+    output.close();
+    if (output.has_error()) {
+        output.clear_error();
+        return module.emitError("cannot write metadata");
     }
+    return mlir::success();
+}
+} // namespace
+
+mlir::LogicalResult PrepareFFNAOT(mlir::ModuleOp module,
+                                  const contracts::FFNCompileSpec &spec,
+                                  llvm::StringRef ir_path, llvm::StringRef metadata_path) {
+    llvm::json::Array operations;
+    if (mlir::failed(NormalizeFFN(module, spec, operations))) return mlir::failure();
+    if (mlir::failed(WriteMetadata(module, metadata_path, llvm::json::Object{
+            {"schema", "coral.ffn.source-map.v1"}, {"operations", std::move(operations)}})))
+        return mlir::failure();
+    return WriteModule(module, ir_path);
+}
+
+mlir::LogicalResult OptimizeFFN(mlir::ModuleOp module,
+                                const contracts::FFNCompileSpec &target,
+                                llvm::StringRef ir_path, llvm::StringRef plan_path) {
+    namespace hlo = mlir::stablehlo;
+    // Only an identity F32 conversion is discarded. No narrowing/widening pair,
+    // rounding change, reduction reassociation, or approximate math is allowed.
+    // Verify the resulting *actual* SSA graph against the complete FFN contract
+    // before changing its public weight bindings.
+    mlir::IRRewriter rewriter(module.getContext());
+    int64_t removed = 0;
+    auto function = module.lookupSymbol<mlir::func::FuncOp>(contracts::kFFNEntryPoint);
+    if (!function || !llvm::hasSingleElement(function.getBody()))
+        return module.emitError("expected a single-block FFN");
+    for (auto &op : llvm::make_early_inc_range(function.front())) {
+        auto convert = llvm::dyn_cast<hlo::ConvertOp>(op);
+        if (!convert || convert.getOperand().getType() != convert.getResult().getType())
+            continue;
+        const auto type = llvm::dyn_cast<mlir::RankedTensorType>(convert.getType());
+        if (!type || !type.getElementType().isF32() || !SemanticAttributes(&op).empty())
+            continue;
+        rewriter.replaceOp(convert, convert.getOperand());
+        ++removed;
+    }
+    contracts::FFNCompileSpec source = target;
+    source.weight_layout = contracts::FFNWeightLayout::Native;
+    llvm::json::Array source_ops;
+    if (mlir::failed(NormalizeFFN(module, source, source_ops))) return mlir::failure();
+    llvm::json::Array weights;
+    if (target.weight_layout == contracts::FFNWeightLayout::Transposed) {
+        llvm::SmallVector<mlir::Type> types(function.getArgumentTypes());
+        for (unsigned i = 1; i < 4; ++i) {
+            auto arg = function.getArgument(i);
+            const auto old = llvm::cast<mlir::RankedTensorType>(arg.getType());
+            const auto replacement = mlir::RankedTensorType::get(
+                {old.getDimSize(1), old.getDimSize(0)}, old.getElementType());
+            // Admission proved that each role has one RHS dot use. Check again
+            // at the rewrite boundary rather than relying on an unchecked cast.
+            if (!arg.hasOneUse()) return module.emitError("weight role has unexpected uses");
+            auto dot = llvm::dyn_cast<hlo::DotGeneralOp>(*arg.getUsers().begin());
+            if (!dot || dot.getRhs() != arg)
+                return module.emitError("weight role is not a dot RHS");
+            weights.push_back(llvm::json::Object{
+                {"argument", i}, {"operation", "transpose"}, {"permutation", llvm::json::Array{1, 0}},
+                {"source_shape", llvm::json::Array{old.getDimSize(0), old.getDimSize(1)}},
+                {"prepared_shape", llvm::json::Array{old.getDimSize(1), old.getDimSize(0)}}});
+            arg.setType(replacement);
+            types[i] = replacement;
+            dot.setDotDimensionNumbersAttr(hlo::DotDimensionNumbersAttr::get(
+                module.getContext(), {}, {}, {1}, {0}));
+        }
+        function.setType(mlir::FunctionType::get(
+            module.getContext(), types, function.getResultTypes()));
+        function->setAttr("coral.ffn_abi",
+                          rewriter.getStringAttr(contracts::FFNAbi(target)));
+    }
+    llvm::json::Array target_ops;
+    if (mlir::failed(VerifyModule(module)) ||
+        mlir::failed(NormalizeFFN(module, target, target_ops))) return mlir::failure();
+    if (mlir::failed(WriteMetadata(module, plan_path, llvm::json::Object{
+            {"schema", "coral.ffn.optimization-plan.v1"},
+            {"pass", "P1-weight-layout"}, {"source_abi", contracts::kFFNAbi},
+            {"target_abi", contracts::FFNAbi(target)},
+            {"removed_identity_f32_converts", removed},
+            {"weight_preparation", std::move(weights)},
+            {"proof", "exact admitted FFN; transpose RHS storage and contract axis 0; no arithmetic change"}})))
+        return mlir::failure();
     return WriteModule(module, ir_path);
 }
 

@@ -93,11 +93,13 @@ def compile_environment(toolchain):
     return identity, {name: str(path) for name, path in paths.items()}
 
 
-def cache_identity(canonical_ir, profile, target, numeric_policy, environment):
+def cache_identity(canonical_ir, profile, target, numeric_policy, environment, weight_layout="native"):
     return {"schema": "coral.ffn.cache.v1", "pipeline": PIPELINE,
             "semantic_sha256": digest(canonical_ir),
             "profile": {"m": profile[0], "d": profile[1], "f": profile[2],
-                        "dtype": "f32", "layout": "row-major", "abi": "coral.ffn.f32.v1"},
+                        "dtype": "f32", "layout": "row-major",
+                        "abi": ("coral.ffn.f32.v1" if weight_layout == "native" else
+                                "coral.ffn.f32.weights-transposed.v1")},
             "target": target, "numeric_policy": numeric_policy,
             "environment": environment}
 
@@ -141,18 +143,19 @@ class RegionCache:
                 {name: files[name] for name in ("linker", "linker_script", "iree_archive", "crt_archive")},
                 "cached compiler support identity mismatch")
         profile = identity["profile"]
+        layout = "native" if profile["abi"] == "coral.ffn.f32.v1" else "transposed"
         with evidence.open("w") as log:
             result = subprocess.run([str(self.toolchain.checker.resolve(strict=True)), str(entry),
-                                     *map(str, (profile["m"], profile["d"], profile["f"]))],
+                                     *map(str, (profile["m"], profile["d"], profile["f"])), layout],
                                     stdout=log, stderr=subprocess.STDOUT, timeout=30, check=False)
         require(result.returncode == 0, "cached artifact rejected; see " + str(evidence))
 
-    def resolve(self, canonical_ir, profile, target, numeric_policy):
+    def resolve(self, canonical_ir, profile, target, numeric_policy, weight_layout="native"):
         start = time.perf_counter()
-        description = self.toolchain.describe(profile)
+        description = self.toolchain.describe(profile, weight_layout)
         require(target == description["compatibility"], "unsupported cache target")
         require(numeric_policy == description["contract"]["numeric_policy"], "unsupported cache policy")
-        identity = cache_identity(canonical_ir, profile, target, numeric_policy, self.environment)
+        identity = cache_identity(canonical_ir, profile, target, numeric_policy, self.environment, weight_layout)
         key = identity_hash(identity)
         entry = self.root / "entries" / key
         work = Path(tempfile.mkdtemp(prefix="lookup-", dir=self.root / "staging"))
@@ -177,7 +180,7 @@ class RegionCache:
             compile_start = time.perf_counter()
             try:
                 package = compile_region(canonical_ir, profile, target, numeric_policy,
-                                         output=work / "package", toolchain=self.toolchain)
+                                         output=work / "package", toolchain=self.toolchain, weight_layout=weight_layout)
                 # Recheck every pinned executable/service/support file before
                 # publication. A changed environment cannot populate an old key.
                 current, _ = compile_environment(self.toolchain)

@@ -5,11 +5,11 @@ namespace coral::compiler {
 using namespace mlir;
 namespace hlo = mlir::stablehlo;
 mlir::Value BuildDenseDot(OpBuilder &builder, Location loc, RankedTensorType result,
-          Value activation, Value weight) {
+          Value activation, Value weight, bool transposed_weight) {
     // GGML stores weights as [N,K]. Both contracting dimensions are 1;
     // no transpose node, batch dimension, or implicit broadcast is needed.
     const auto dims = hlo::DotDimensionNumbersAttr::get(
-        builder.getContext(), {}, {}, {1}, {1});
+        builder.getContext(), {}, {}, {1}, {transposed_weight ? 0 : 1});
     const auto precision = hlo::PrecisionAttr::get(
         builder.getContext(), hlo::Precision::DEFAULT);
     return builder.create<hlo::DotGeneralOp>(

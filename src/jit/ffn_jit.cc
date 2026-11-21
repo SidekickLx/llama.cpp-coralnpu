@@ -192,7 +192,7 @@ struct FFNJitClient::State {
     JSON config;
     fs::path root;
     explicit State(const std::string &path) : config(json::Read(path)) {
-        json::Keys(config, {"schema", "cache", "environment", "paths", "environment_sha256", "timeout_seconds"});
+        json::Keys(config, {"schema", "cache", "environment", "paths", "environment_sha256", "timeout_seconds", "optimization"});
         Require(config.at("schema") == "coral.ffn.jit-config.v1", "unknown JIT configuration");
         Require(Hash(config.at("environment")) == Digest(config.at("environment_sha256")),
                 "JIT environment digest mismatch");
@@ -206,6 +206,9 @@ struct FFNJitClient::State {
                 JSON::parse(artifacts::DescribeFFNJSON(tiny)).at("compiler_options"),
                 "JIT compiler options mismatch");
         json::Integer(config.at("timeout_seconds"), 1, 600);
+        json::Keys(config.at("optimization"), {"weight_layout"});
+        const auto layout = config.at("optimization").at("weight_layout");
+        Require(layout == "native" || layout == "transposed", "unknown JIT weight layout");
         const auto &paths = config.at("paths");
         const auto &files = env.at("files");
         Require(paths.is_object() && files.is_object() && paths.size() == files.size(),
@@ -245,7 +248,7 @@ struct FFNJitClient::State {
                 "incompatible JIT cache identity");
         const auto &s = spec.shape;
         const JSON profile{{"m", s.m}, {"d", s.d}, {"f", s.f}, {"dtype", "f32"},
-                           {"layout", "row-major"}, {"abi", contracts::kFFNAbi}};
+                           {"layout", "row-major"}, {"abi", contracts::FFNAbi(spec)}};
         Require(json::Canonical(identity.at("profile")) == json::Canonical(profile),
                 "JIT cache profile mismatch");
         const auto manifest = json::Read((directory / "manifest.json").string());
@@ -267,15 +270,23 @@ FFNJitClient::FFNJitClient(const std::string &configuration)
     : state_(std::make_unique<State>(configuration)) {}
 FFNJitClient::~FFNJitClient() = default;
 
+contracts::FFNCompileSpec FFNJitClient::Specification(contracts::FFNShape shape) const {
+    contracts::FFNCompileSpec spec;
+    spec.shape = shape;
+    if (state_->config.at("optimization").at("weight_layout") == "transposed")
+        spec.weight_layout = contracts::FFNWeightLayout::Transposed;
+    contracts::ValidateFFNSpec(spec);
+    return spec;
+}
+
 Artifact FFNJitClient::Resolve(const planner::GGMLFFNPlan &plan, Stats &stats) {
     Elapsed elapsed{stats};
     ++stats.requests;
-    contracts::FFNCompileSpec spec;
-    spec.shape = plan.shape;
-    contracts::ValidateFFNSpec(spec);
+    const auto spec = Specification(plan.shape);
     const JSON request{{"schema", "coral.ffn.jit-request.v1"},
                        {"environment_sha256", state_->config.at("environment_sha256")},
-                       {"snapshot", Snapshot(plan)}};
+                       {"snapshot", Snapshot(plan)},
+                       {"optimization", state_->config.at("optimization")}};
     const auto request_key = Hash(request);
     std::string invalid;
     try {

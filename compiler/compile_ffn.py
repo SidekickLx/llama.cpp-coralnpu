@@ -4,7 +4,7 @@
 import argparse
 from pathlib import Path
 import tempfile
-from region_service import ROOT, Toolchain, canonicalize_region, compile_region, require
+from region_service import ROOT, Toolchain, optimize_region, compile_region, require
 
 
 def main():
@@ -13,6 +13,7 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     for name in ("m", "d", "f"):
         parser.add_argument("--" + name, type=int, required=True)
+    parser.add_argument("--weight-layout", choices=("native", "transposed"), default="native")
     defaults = Toolchain()
     for name in ("tool", "checker", "compiler"):
         parser.add_argument("--" + name, type=Path, default=getattr(defaults, name))
@@ -22,12 +23,12 @@ def main():
     evidence = Path(tempfile.mkdtemp(prefix=args.output.name + ".source-", dir=args.output.parent.resolve()))
     toolchain = Toolchain(args.tool, args.checker, args.compiler)
     profile = (args.m, args.d, args.f)
-    description = toolchain.describe(profile)
-    canonical = canonicalize_region(args.input.read_bytes(), profile,
+    description = toolchain.describe(profile, args.weight_layout)
+    canonical = optimize_region(args.input.read_bytes(), profile, args.weight_layout,
                                     toolchain=toolchain, evidence=evidence / "normalization")
     output = compile_region(canonical, profile, description["compatibility"],
                             description["contract"]["numeric_policy"],
-                            output=args.output, toolchain=toolchain)
+                            output=args.output, toolchain=toolchain, weight_layout=args.weight_layout)
     print(f"Source evidence: {evidence}", flush=True)
     print(f"Artifact: {output}", flush=True)
 

@@ -31,12 +31,18 @@ using PointwiseKey = std::tuple<contracts::PointwiseKind, std::size_t, std::size
 using FFNKey = std::tuple<std::int64_t, std::int64_t, std::int64_t>;
 using WeightKey = std::tuple<std::uintptr_t, std::uintptr_t, std::size_t, std::size_t>;
 
+struct FFNCatalogEntry {
+    std::string directory;
+    contracts::FFNWeightLayout layout = contracts::FFNWeightLayout::Native;
+};
+using FFNModuleKey = std::tuple<std::int64_t, std::int64_t, std::int64_t, contracts::FFNWeightLayout>;
 struct Registration {
     Options options;
     std::unique_ptr<jit::FFNJitClient> jit_client;
     std::map<ShapeKey, std::string> artifacts;
     std::map<PointwiseKey, std::string> pointwise_artifacts;
-    std::map<FFNKey, std::string> ffn_artifacts;
+    std::map<FFNKey, FFNCatalogEntry> ffn_artifacts;
+    std::uint64_t weight_generation = 0;
     Stats stats;
     std::string error;
     bool registered = false;
@@ -138,16 +144,33 @@ struct BackendContext {
     std::map<ShapeKey, std::unique_ptr<LoadedModule>> modules;
     std::map<WeightKey, std::unique_ptr<PreparedWeight>> weights;
     std::map<PointwiseKey, std::unique_ptr<runtime::PointwiseModule>> pointwise_modules;
-    std::map<FFNKey, std::unique_ptr<runtime::FFNModule>> ffn_modules;
+    std::map<FFNModuleKey, std::unique_ptr<runtime::FFNModule>> ffn_modules;
     // Include ordered roles, tensor identity, buffer and data identity and shape.
     // Same-shaped layers must not share snapshots accidentally.
-    using FFNWeightKey = std::array<std::uintptr_t, 11>;
+    using FFNWeightKey = std::array<std::uintptr_t, 12>;
     std::map<FFNWeightKey, std::unique_ptr<runtime::PreparedFFNWeights>> ffn_weights;
     std::map<const ggml_cgraph *, PlannedSplit> planned_splits;
     const void *planning_parent = nullptr;
     bool executed_since_optimization = false;
     bool failed = false;
     std::uint64_t optimization_generation = 0;
+
+    std::uint64_t weight_generation = registration.weight_generation;
+
+    void RefreshWeightGeneration() {
+        if (weight_generation == registration.weight_generation) return;
+        // MPACT owns a read-only binding cache below the HAL. Rebuilding the
+        // entire device prevents stale data even when host addresses are reused.
+        // Build the replacement before discarding healthy caches.
+        device.Reset();
+        ffn_modules.clear();
+        pointwise_modules.clear();
+        modules.clear();
+        ffn_weights.clear();
+        weights.clear();
+        weight_generation = registration.weight_generation;
+        ++registration.stats.weight_cache_resets;
+    }
 
     void ComputeFFN(const planner::GGMLFFNPlan &plan) {
         contracts::FFNCompileSpec spec;
@@ -162,26 +185,29 @@ struct BackendContext {
         if (!HostStorage(destination)) {
             throw std::runtime_error("FFN output must have host-visible storage");
         }
-        const auto key = Key(plan.shape);
+        const auto aot = registration.ffn_artifacts.find(Key(plan.shape));
+        if (aot != registration.ffn_artifacts.end()) {
+            spec.weight_layout = aot->second.layout;
+        } else {
+            if (!registration.jit_client) {
+                const auto start = std::chrono::steady_clock::now();
+                registration.jit_client = std::make_unique<jit::FFNJitClient>(
+                    registration.options.jit_configuration);
+                registration.stats.jit_initialization_ms +=
+                    std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - start).count();
+            }
+            spec = registration.jit_client->Specification(plan.shape);
+        }
+        const FFNModuleKey key{spec.shape.m, spec.shape.d, spec.shape.f, spec.weight_layout};
         auto module = ffn_modules.find(key);
         if (module == ffn_modules.end()) {
-            // A listed but corrupt/incompatible package is an error. Do not
-            // conceal deployment failures by replaying its original members.
-            const auto aot = registration.ffn_artifacts.find(key);
+            // A listed but corrupt package remains a deployment error.
             std::string directory, expected_program;
             if (aot != registration.ffn_artifacts.end()) {
-                directory = aot->second;
+                directory = aot->second.directory;
             } else {
-                if (!registration.jit_client) {
-                    const auto start = std::chrono::steady_clock::now();
-                    registration.jit_client = std::make_unique<jit::FFNJitClient>(
-                        registration.options.jit_configuration);
-                    registration.stats.jit_initialization_ms +=
-                        std::chrono::duration<double, std::milli>(
-                            std::chrono::steady_clock::now() - start).count();
-                }
-                // Planning/capability queries never compile. The live guard has
-                // already passed; this synchronous miss keeps our VM/device alive.
+                // Only execution reaches this call; reservation never compiles.
                 const auto artifact = registration.jit_client->Resolve(plan, registration.stats.jit);
                 directory = artifact.directory;
                 expected_program = artifact.program_sha256;
@@ -198,6 +224,7 @@ struct BackendContext {
         FFNWeightKey weight_key{};
         weight_key[9] = plan.shape.d;
         weight_key[10] = plan.shape.f;
+        weight_key[11] = static_cast<std::uintptr_t>(spec.weight_layout);
         bool cacheable = registration.options.immutable_model_weights;
         for (std::size_t i = 0; i < plan.inputs.size(); ++i) {
             auto *tensor = plan.inputs[i];
@@ -373,6 +400,17 @@ planner::MemberSupport QueryFFNMember(const ggml_tensor *node, void *);
 
 ggml_status GraphCompute(ggml_backend_t backend, ggml_cgraph *graph) {
     auto &context = *static_cast<BackendContext *>(backend->context);
+    try {
+        context.RefreshWeightGeneration();
+    } catch (const std::exception &error) {
+        context.failed = true;
+        RecordError(error.what());
+        return GGML_STATUS_FAILED;
+    } catch (...) {
+        context.failed = true;
+        RecordError("cannot reset prepared weights");
+        return GGML_STATUS_FAILED;
+    }
     const auto before = context.device.stats();
     ++registration.stats.graph_calls;
     context.executed_since_optimization = true;
@@ -657,9 +695,9 @@ std::map<PointwiseKey, std::string> ReadPointwiseArtifacts(const std::string &di
     }
     return result;
 }
-std::map<FFNKey, std::string> ReadFFNArtifacts(const std::string &directory) {
+std::map<FFNKey, FFNCatalogEntry> ReadFFNArtifacts(const std::string &directory) {
     const auto root = std::filesystem::canonical(directory);
-    std::map<FFNKey, std::string> result;
+    std::map<FFNKey, FFNCatalogEntry> result;
     if (!std::filesystem::exists(root / "ffn.tsv")) {
         return result;
     }
@@ -675,8 +713,13 @@ std::map<FFNKey, std::string> ReadFFNArtifacts(const std::string &directory) {
         contracts::FFNCompileSpec spec;
         std::string dirname, extra;
         std::istringstream fields(line);
-        if (!(fields >> spec.shape.m >> spec.shape.d >> spec.shape.f >> dirname) || fields >> extra) {
+        if (!(fields >> spec.shape.m >> spec.shape.d >> spec.shape.f >> dirname)) {
             throw std::runtime_error("invalid FFN catalog row");
+        }
+        if (fields >> extra) {
+            if (extra == "transposed") spec.weight_layout = contracts::FFNWeightLayout::Transposed;
+            else if (extra != "native") throw std::runtime_error("invalid FFN catalog layout");
+            if (fields >> extra) throw std::runtime_error("invalid FFN catalog row");
         }
         contracts::ValidateFFNSpec(spec);
         const std::filesystem::path path(dirname);
@@ -684,7 +727,7 @@ std::map<FFNKey, std::string> ReadFFNArtifacts(const std::string &directory) {
             std::filesystem::is_symlink(root / path) || !std::filesystem::is_directory(root / path)) {
             throw std::runtime_error("FFN profile must name a local package directory");
         }
-        if (!result.emplace(Key(spec.shape), (root / path).string()).second) {
+        if (!result.emplace(Key(spec.shape), FFNCatalogEntry{(root / path).string(), spec.weight_layout}).second) {
             throw std::runtime_error("duplicate FFN profile");
         }
     }
@@ -799,6 +842,12 @@ void Register(const Options &options) {
     ggml_backend_register(&reg);
 }
 
+void InvalidateModelWeights() {
+    if (!registration.registered) throw std::logic_error("Coral backend is not registered");
+    if (registration.weight_generation == UINT64_MAX)
+        throw std::overflow_error("weight generation exhausted");
+    ++registration.weight_generation;
+}
 Stats GetStats() { return registration.stats; }
 const std::string &LastError() { return registration.error; }
 

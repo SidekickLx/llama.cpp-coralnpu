@@ -302,8 +302,9 @@ Implementation status (2026-11-20): steps 1–3 are implemented and accepted:
 the unified canonical StableHLO compile service, validated persistent cache,
 and opt-in synchronous FFN compiler worker are connected to GGML execution.
 A cold real-model run compiles the two exact FFN profiles once each; a new
-process reuses both artifacts without launching a child process. P1/P2 remain
-pending. See [architecture](m5-jit.md) and [acceptance evidence](m5-jit-test-report.md).
+process reuses both artifacts without launching a child process. P1 is also implemented and accepted (versioned prepared-weight ABI, explicit
+weight invalidation, official-reference/Coral/model and JIT matrix checks).
+P2 remains pending. See [optimization evidence](m5-optimization-test-report.md). See [architecture](m5-jit.md) and [acceptance evidence](m5-jit-test-report.md).
 Member capability and fusion legality still gate JIT; the pinned llama.cpp
 checkout remains unmodified.
 

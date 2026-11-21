@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--matmuls", type=Path, required=True)
     parser.add_argument("--pointwise", type=Path, required=True)
     parser.add_argument("--aot", type=Path, required=True)
+    parser.add_argument("--weight-layout", choices=("native", "transposed"), default="native")
     parser.add_argument("--model", type=Path, default=ROOT / "models/stories260K-f32.gguf")
     args = parser.parse_args()
     revision = require_clean()
@@ -57,7 +58,8 @@ def main():
         return result
 
     command("configure", [sys.executable, ROOT / "compiler/jit_worker.py", "configure",
-                         "--cache", work / "cache", "--output", config_path])
+                         "--cache", work / "cache", "--output", config_path,
+                         "--weight-layout", args.weight_layout])
     command("cpu", [runner, "--mode", "cpu", "--model", args.model, "--output", work / "cpu"])
     _, reference = read_run(work / "cpu", "cpu")
     tokens = work / "cpu/tokens.txt"
@@ -70,7 +72,7 @@ def main():
             require(not (work / label / "summary.json").exists(), "failure published completion")
             return result
         summary, values = read_run(work / label, "coral")
-        inspect_regions(work / label, 20)
+        inspect_regions(work / label, 20, {1: 3, 5: 3} if args.weight_layout == "transposed" else None)
         require(summary["stats"]["matmuls"] == 84 and summary["stats"]["calls_completed"] == 104,
                 "missing mixed matmul/FFN execution")
         require(summary["stats"]["ffn_module_cache_hits"] == 18 and
@@ -118,7 +120,15 @@ def main():
         shape = identity["profile"]
         original = args.aot / ("real-decode" if shape["m"] == 1 else "real-prefill")
         old = json.loads((original / "manifest.json").read_text())
-        require(identity["semantic_sha256"] == old["program"]["semantic_sha256"],
+        expected_semantic = old["program"]["semantic_sha256"]
+        if args.weight_layout == "transposed":
+            from region_service import Toolchain, optimize_region
+            from ffn_artifact import digest
+            transformed = optimize_region((original / "region.stablehlo.mlir").read_bytes(),
+                                          (shape["m"], shape["d"], shape["f"]), "transposed",
+                                          toolchain=Toolchain(), evidence=work / ("aot-p1-" + str(shape["m"])))
+            expected_semantic = digest(transformed)
+        require(identity["semantic_sha256"] == expected_semantic,
                 "JIT import differs from accepted AOT semantics")
     victim = entries[0]
     (victim / "region.vmfb").write_bytes(b"deliberately corrupt cached program")

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import sys
 from region_cache import RegionCache, identity_hash, read_json
-from region_service import Toolchain, canonicalize_region, invoke, require
+from region_service import Toolchain, optimize_region, invoke, require
 from ffn_artifact import write_json
 
 
@@ -21,7 +21,8 @@ def configure(args):
                        "cache": str(cache.root),
                        "environment": cache.environment, "paths": cache.paths,
                        "environment_sha256": identity_hash(cache.environment),
-                       "timeout_seconds": args.timeout})
+                       "timeout_seconds": args.timeout,
+                       "optimization": {"weight_layout": args.weight_layout}})
     print(json.dumps({"status": "configured", "configuration": str(output),
                       "environment_sha256": identity_hash(cache.environment)}))
 
@@ -31,6 +32,10 @@ def compile_request(args):
     require(config["schema"] == "coral.ffn.jit-config.v1", "unknown JIT configuration")
     require(identity_hash(config["environment"]) == config["environment_sha256"],
             "JIT environment digest mismatch")
+    optimization = config["optimization"]
+    require(set(optimization) == {"weight_layout"} and
+            optimization["weight_layout"] in ("native", "transposed"), "invalid optimization policy")
+    layout = optimization["weight_layout"]
     paths = config["paths"]
     tools = Toolchain(Path(paths["tool"]), Path(paths["checker"]), Path(paths["compiler"]))
     cache = RegionCache(Path(config["cache"]), tools)
@@ -39,9 +44,10 @@ def compile_request(args):
     work = args.request.resolve(strict=True).parent
     require(work.is_relative_to(cache.root / "staging"), "request evidence must be in cache staging")
     request = read_json(args.request, 64 * 1024)
-    require(set(request) == {"schema", "environment_sha256", "snapshot"} and
+    require(set(request) == {"schema", "environment_sha256", "snapshot", "optimization"} and
             request["schema"] == "coral.ffn.jit-request.v1" and
-            request["environment_sha256"] == config["environment_sha256"],
+            request["environment_sha256"] == config["environment_sha256"] and
+            request["optimization"] == optimization,
             "invalid JIT request")
     request_key = identity_hash(request)
     snapshot = request["snapshot"]
@@ -50,11 +56,11 @@ def compile_request(args):
     write_json(work / "snapshot.json", snapshot)
     invoke([tools.tool, "import-ggml-ffn", work / "snapshot.json", work / "imported.mlir"],
            work, "import")
-    canonical = canonicalize_region((work / "imported.mlir").read_bytes(), profile,
-                                    toolchain=tools, evidence=work / "normalization")
-    description = tools.describe(profile)
+    canonical = optimize_region((work / "imported.mlir").read_bytes(), profile, layout,
+                                toolchain=tools, evidence=work / "normalization")
+    description = tools.describe(profile, layout)
     result = cache.resolve(canonical, profile, description["compatibility"],
-                           description["contract"]["numeric_policy"])
+                           description["contract"]["numeric_policy"], weight_layout=layout)
     # This index is a memo of a verified GGML snapshot -> canonical artifact.
     # It lets a later process validate a hit without loading MLIR or a worker.
     index = {"schema": "coral.ffn.request-index.v1",
@@ -78,6 +84,7 @@ def main():
     setup.add_argument("--cache", type=Path, required=True)
     setup.add_argument("--output", type=Path, required=True)
     setup.add_argument("--timeout", type=int, default=600)
+    setup.add_argument("--weight-layout", choices=("native", "transposed"), default="native")
     defaults = Toolchain()
     for name in ("tool", "checker", "compiler"):
         setup.add_argument("--" + name, type=Path, default=getattr(defaults, name))

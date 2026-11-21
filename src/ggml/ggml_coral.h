@@ -74,6 +74,7 @@ struct Stats {
     std::uint64_t pointwise_calls = 0;
     std::uint64_t weight_cache_hits = 0;
     std::uint64_t weight_preparations = 0;
+    std::uint64_t weight_cache_resets = 0;
     std::uint64_t failures = 0;
 };
 
@@ -89,6 +90,11 @@ bool CompatiblePointwise(const ggml_tensor *op,
 // Reads profiles.tsv and optional pointwise.tsv/ffn.tsv indexes eagerly; supports_op only
 // queries their in-memory indexes. Missing members stay on another backend.
 void Register(const Options &options);
+// Between synchronous graph calls, before modifying/replacing immutable model
+// weights. Every backend lazily rebuilds its device and all runtime caches on
+// the next call, including the simulator's read-only binding cache.
+// Callers still own weight storage lifetimes; never mutate during execution.
+void InvalidateModelWeights();
 Stats GetStats();
 const std::string &LastError();
 

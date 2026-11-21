@@ -110,12 +110,14 @@ JSON Binding(const char *role, std::int64_t rows, std::int64_t cols) {
 JSON Contract(const contracts::FFNCompileSpec &spec) {
     contracts::ValidateFFNSpec(spec);
     const auto &s = spec.shape;
-    return {{"abi", contracts::kFFNAbi}, {"entry", contracts::kFFNEntryPoint},
+    const auto rows = spec.weight_layout == contracts::FFNWeightLayout::Transposed ? s.d : s.f;
+    const auto cols = spec.weight_layout == contracts::FFNWeightLayout::Transposed ? s.f : s.d;
+    return {{"abi", contracts::FFNAbi(spec)}, {"entry", contracts::kFFNEntryPoint},
             {"numeric_policy", contracts::kFFNNumericPolicy},
             {"shape", {{"m", s.m}, {"d", s.d}, {"f", s.f}}},
             {"inputs", JSON::array({Binding("activation", s.m, s.d),
-                Binding("gate_weight", s.f, s.d), Binding("up_weight", s.f, s.d),
-                Binding("down_weight", s.d, s.f)})},
+                Binding("gate_weight", rows, cols), Binding("up_weight", rows, cols),
+                Binding("down_weight", cols, rows)})},
             {"output", Binding("output", s.m, s.d)}};
 }
 JSON CompilerOptions() {

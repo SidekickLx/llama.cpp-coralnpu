@@ -194,3 +194,7 @@ P2 M buckets remain the next M5 steps.
 
 The completed steps 1–3 acceptance, measured costs and raw evidence locations
 are recorded in [the test report](m5-jit-test-report.md).
+
+P1's optional prepared-weight ABI and invalidation interface are documented in
+[m5-optimizations.md](m5-optimizations.md), with numerical and performance
+[evidence](m5-optimization-test-report.md).

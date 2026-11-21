@@ -65,11 +65,12 @@ class Toolchain:
         return {name: getattr(self, name).resolve(strict=True)
                 for name in ("tool", "checker", "compiler")}
 
-    def describe(self, profile):
+    def describe(self, profile, weight_layout="native"):
         require(isinstance(profile, (tuple, list)) and len(profile) == 3 and
                 all(type(size) is int and size > 0 for size in profile), "invalid FFN profile")
+        require(weight_layout in ("native", "transposed"), "unsupported FFN weight layout")
         return json.loads(subprocess.check_output(
-            [str(self.paths()["checker"]), "--describe", *map(str, profile)], text=True))
+            [str(self.paths()["checker"]), "--describe", *map(str, profile), weight_layout], text=True))
 
     def support(self):
         root = Path(str(self.paths()["compiler"]) + ".runfiles") / "_main"
@@ -93,8 +94,20 @@ def canonicalize_region(source, profile, *, toolchain, evidence):
     return (evidence / "canonical.mlir").read_bytes()
 
 
+def optimize_region(source, profile, weight_layout, *, toolchain, evidence):
+    """P1 on admitted standard StableHLO; keep before/after and preparation plan."""
+    evidence = Path(evidence)
+    evidence.mkdir(parents=True, exist_ok=False)
+    toolchain.describe(profile, weight_layout)
+    (evidence / "before.mlir").write_bytes(source)
+    invoke([toolchain.paths()["tool"], "optimize-ffn", evidence / "before.mlir",
+            *profile, evidence / "after.mlir", evidence / "plan.json", weight_layout],
+           evidence, "optimize")
+    return (evidence / "after.mlir").read_bytes()
+
+
 def compile_region(canonical_ir, profile, target, numeric_policy, *,
-                   output, toolchain=None):
+                   output, toolchain=None, weight_layout="native"):
     """The only FFN compilation pipeline, shared by AOT and JIT cache misses.
 
     canonical_ir is normalized standard StableHLO bytes, not a shape template.
@@ -102,7 +115,7 @@ def compile_region(canonical_ir, profile, target, numeric_policy, *,
     The current implementation admits the locked F32 FFN ABI/target only.
     """
     toolchain = toolchain or Toolchain()
-    description = toolchain.describe(profile)
+    description = toolchain.describe(profile, weight_layout)
     require(target == description["compatibility"], "unsupported target/runtime compatibility")
     require(numeric_policy == description["contract"]["numeric_policy"], "unsupported numeric policy")
     require(isinstance(canonical_ir, bytes) and 0 < len(canonical_ir) <= 16 * 1024 * 1024,
@@ -123,7 +136,7 @@ def compile_region(canonical_ir, profile, target, numeric_policy, *,
     (work / "source.mlir").write_bytes(source_bytes)
     start = time.perf_counter()
     invoke([tool, "prepare-ffn", work / "source.mlir", *dimensions,
-            work / "region.stablehlo.mlir", work / "region.metadata.json"], work, "prepare")
+            work / "region.stablehlo.mlir", work / "region.metadata.json", weight_layout], work, "prepare")
     require((work / "region.stablehlo.mlir").read_bytes() == canonical_ir,
             "compile_region requires canonical StableHLO; call canonicalize_region first")
     semantic = digest((work / "region.stablehlo.mlir").read_bytes())
@@ -170,7 +183,7 @@ def compile_region(canonical_ir, profile, target, numeric_policy, *,
     require(digest(tool.read_bytes()) == tool_hash, "frontend changed during build")
     manifest = make_manifest(work, description, binary_hash, support_hashes, placement)
     write_json(work / "manifest.json", manifest)
-    invoke([checker, work, *dimensions], work, "artifact-check")
+    invoke([checker, work, *dimensions, weight_layout], work, "artifact-check")
     # No paths or live tensor identities become semantic identity. Build logs
     # stay in the retained package for diagnostics and are not executable inputs.
     write_json(work / "build-report.json", {"status": "passed", "shape": list(profile),

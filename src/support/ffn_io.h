@@ -15,6 +15,7 @@ struct FFNInputs {
 };
 struct FFNRunnerOptions {
     std::string artifact;
+    contracts::FFNWeightLayout weight_layout = contracts::FFNWeightLayout::Native;
     std::vector<std::string> inputs;
     std::string output;
     std::size_t repeat = 3;

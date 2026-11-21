@@ -9,6 +9,7 @@ struct FFNWeightState;
 }
 
 // Immutable owning snapshots of W_gate[F,D], W_up[F,D], W_down[D,F].
+// Native bindings are transposed once when the requested VM ABI requires it.
 // All three bindings are validated before any upload. Snapshots may be reused
 // by modules with different M and identical D/F on the same DeviceContext.
 // Borrowed host bindings need remain valid only until construction returns.

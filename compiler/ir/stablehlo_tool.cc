@@ -9,12 +9,22 @@ int main(int argc, char **argv) {
         return coral::compiler::ImportGGMLSnapshot(argv[2], argv[3]);
     }
     mlir::MLIRContext context;
-    if (argc == 8 && llvm::StringRef(argv[1]) == "prepare-ffn") {
+    if ((argc == 8 || argc == 9) && (llvm::StringRef(argv[1]) == "prepare-ffn" ||
+                                    llvm::StringRef(argv[1]) == "optimize-ffn")) {
         coral::contracts::FFNCompileSpec spec;
         if (llvm::StringRef(argv[3]).getAsInteger(10, spec.shape.m) ||
             llvm::StringRef(argv[4]).getAsInteger(10, spec.shape.d) ||
             llvm::StringRef(argv[5]).getAsInteger(10, spec.shape.f)) return 1;
+        if (argc == 9) {
+            const llvm::StringRef layout(argv[8]);
+            if (layout == "transposed")
+                spec.weight_layout = coral::contracts::FFNWeightLayout::Transposed;
+            else if (layout != "native") return 1;
+        }
         auto module = coral::compiler::ReadModule(context, argv[2]);
+        if (llvm::StringRef(argv[1]) == "optimize-ffn")
+            return !module || mlir::failed(coral::compiler::OptimizeFFN(
+                *module, spec, argv[6], argv[7])) ? 1 : 0;
         return !module || mlir::failed(coral::compiler::PrepareFFNAOT(
             *module, spec, argv[6], argv[7])) ? 1 : 0;
     }

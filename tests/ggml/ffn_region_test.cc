@@ -160,7 +160,9 @@ void Scheduled(ggml_backend_t cpu, int rows, int spelling,
         reference.gate->op_params[0] = GGML_PREC_F32;
     }
     for (int run = 0; run < 3; ++run) {
-        const int weight_seed = immutable ? 2 : 2 + run * 3;
+        const bool changed = mode == "weight-generation";
+        const int weight_seed = immutable && !changed ? 2 : 2 + run * 3;
+        if (changed && run > 0) adapter::InvalidateModelWeights();
         f.Set(run + 1, weight_seed);
         reference.Set(run + 1, weight_seed);
         Require(ggml_backend_graph_compute(cpu, reference.graph) == GGML_STATUS_SUCCESS, "CPU oracle");
@@ -181,9 +183,13 @@ void Scheduled(ggml_backend_t cpu, int rows, int spelling,
         Require(after.ffn_members_skipped - before.ffn_members_skipped ==
                     regions * (spelling ? 5 : 4), "wrong skipped member count");
         Require(after.ffn_weight_preparations - before.ffn_weight_preparations ==
-                    (immutable ? per_run : 3 * per_run), "wrong weight preparation count");
+                    (immutable && mode != "weight-generation" ? per_run : 3 * per_run), "wrong weight preparation count");
         Require(after.ffn_weight_cache_hits - before.ffn_weight_cache_hits ==
-                    (immutable ? 2 * per_run : 0), "wrong weight cache hit count");
+                    (immutable && mode != "weight-generation" ? 2 * per_run : 0), "wrong weight cache hit count");
+        if (mode == "weight-generation") {
+            Require(after.weight_cache_resets - before.weight_cache_resets == 2,
+                    "weight changes did not rebuild the device cache");
+        }
         if (mode == "multiple-splits") {
             Require(ggml_backend_sched_get_n_splits(scheduler.get()) >= 4, "missing multiple splits");
         }
@@ -245,7 +251,7 @@ int main(int argc, char **argv) {
         if (argc == 4) options.jit_configuration = argv[3];
         options.evaluation_callbacks = mode == "callbacks";
         options.enable_ffn = mode != "disabled";
-        options.immutable_model_weights = mode == "immutable";
+        options.immutable_model_weights = mode == "immutable" || mode == "weight-generation";
         options.ffn_trace = Observation::FFN;
         options.trace_user_data = &events;
         adapter::Register(options);
@@ -268,7 +274,7 @@ int main(int argc, char **argv) {
             for (const auto &name : cases) {
                 for (int rows : {1, 5}) {
                     for (int spelling = 0; spelling < 3; ++spelling) {
-                        Scheduled(cpu.get(), rows, spelling, name, mode == "immutable");
+                        Scheduled(cpu.get(), rows, spelling, name, options.immutable_model_weights);
                     }
                 }
             }

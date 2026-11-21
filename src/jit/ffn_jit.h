@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
+#include "contracts/ffn_contract.h"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -20,6 +21,7 @@ class FFNJitClient {
   public:
     explicit FFNJitClient(const std::string &configuration);
     ~FFNJitClient();
+    contracts::FFNCompileSpec Specification(contracts::FFNShape) const;
     Artifact Resolve(const planner::GGMLFFNPlan &, Stats &);
     FFNJitClient(const FFNJitClient &) = delete;
     FFNJitClient &operator=(const FFNJitClient &) = delete;
