@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "stablehlo_program.h"
 #include "stablehlo_ops.h"
+#include "contracts/ffn_artifact.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -114,22 +115,25 @@ mlir::OwningOpRef<mlir::ModuleOp> BuildFFN(
     mlir::OwningOpRef<mlir::ModuleOp> module(mlir::ModuleOp::create(loc));
     const auto f32 = builder.getF32Type();
     const auto x = mlir::RankedTensorType::get({shape.m, shape.d}, f32);
-    const auto weight = mlir::RankedTensorType::get({shape.f, shape.d}, f32);
-    const auto down_weight = mlir::RankedTensorType::get({shape.d, shape.f}, f32);
+    const bool transposed = spec.weight_layout == contracts::FFNWeightLayout::Transposed;
+    const auto rows = transposed ? shape.d : shape.f;
+    const auto cols = transposed ? shape.f : shape.d;
+    const auto weight = mlir::RankedTensorType::get({rows, cols}, f32);
+    const auto down_weight = mlir::RankedTensorType::get({cols, rows}, f32);
     const auto hidden_type = mlir::RankedTensorType::get({shape.m, shape.f}, f32);
     auto function = mlir::func::FuncOp::create(
         loc, contracts::kFFNEntryPoint,
         builder.getFunctionType({x, weight, weight, down_weight}, {x}));
-    function->setAttr("coral.ffn_abi", builder.getStringAttr(contracts::kFFNAbi));
+    function->setAttr("coral.ffn_abi", builder.getStringAttr(contracts::FFNAbi(spec)));
     function->setAttr("coral.numeric_policy", builder.getStringAttr("f32_no_fast_math_v1"));
     module->push_back(function);
     auto *block = function.addEntryBlock();
     builder.setInsertionPointToStart(block);
-    const auto gate = BuildDenseDot(builder, loc, hidden_type, block->getArgument(0), block->getArgument(1));
-    const auto up = BuildDenseDot(builder, loc, hidden_type, block->getArgument(0), block->getArgument(2));
+    const auto gate = BuildDenseDot(builder, loc, hidden_type, block->getArgument(0), block->getArgument(1), transposed);
+    const auto up = BuildDenseDot(builder, loc, hidden_type, block->getArgument(0), block->getArgument(2), transposed);
     const auto activated_gate = BuildSilu(builder, loc, gate);
     const mlir::Value hidden = builder.create<mlir::stablehlo::MulOp>(loc, activated_gate, up);
-    const auto result = BuildDenseDot(builder, loc, x, hidden, block->getArgument(3));
+    const auto result = BuildDenseDot(builder, loc, x, hidden, block->getArgument(3), transposed);
     builder.create<mlir::func::ReturnOp>(loc, result);
     if (mlir::failed(VerifyModule(*module))) {
         return {};

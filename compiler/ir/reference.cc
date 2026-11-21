@@ -57,6 +57,7 @@ LogicalResult CheckProgram(ModuleOp module, func::FuncOp function) {
         if (++operations > 1024 || !llvm::isa<
                 hlo::ConstantOp, hlo::DotGeneralOp, hlo::BroadcastInDimOp,
                 hlo::NegOp, hlo::ExpOp, hlo::AddOp, hlo::DivOp, hlo::MulOp,
+                hlo::PadOp, hlo::SliceOp,
                 func::ReturnOp>(operation)) {
             return operation.emitError("operation is outside the M3 reference subset");
         }
@@ -80,16 +81,19 @@ LogicalResult CheckProgram(ModuleOp module, func::FuncOp function) {
             const auto rhs = llvm::cast<RankedTensorType>(dot.getRhs().getType());
             const auto dims = dot.getDotDimensionNumbers();
             const llvm::SmallVector<int64_t> contracting = {1};
+            const llvm::SmallVector<int64_t> transposed = {0};
             if (lhs.getRank() != 2 || rhs.getRank() != 2 ||
                 !dims.getLhsBatchingDimensions().empty() ||
                 !dims.getRhsBatchingDimensions().empty() ||
                 dims.getLhsContractingDimensions() != llvm::ArrayRef<int64_t>(contracting) ||
-                dims.getRhsContractingDimensions() != llvm::ArrayRef<int64_t>(contracting) ||
+                (dims.getRhsContractingDimensions() != llvm::ArrayRef<int64_t>(contracting) &&
+                 dims.getRhsContractingDimensions() != llvm::ArrayRef<int64_t>(transposed)) ||
                 dot.getAlgorithm()) {
-                return dot.emitError("M3 reference dot requires unbatched [M,K] x [N,K] and no algorithm override");
+                return dot.emitError("reference dot requires unbatched matrices, RHS contract axis 0 or 1, and no algorithm override");
             }
             // Each matrix has already passed the bounded element-count check.
-            dot_products += lhs.getDimSize(0) * lhs.getDimSize(1) * rhs.getDimSize(0);
+            const int64_t output_axis = dims.getRhsContractingDimensions()[0] == 0 ? 1 : 0;
+            dot_products += lhs.getDimSize(0) * lhs.getDimSize(1) * rhs.getDimSize(output_axis);
             if (dot_products > kMaxDotProducts) {
                 return dot.emitError("reference dot product budget exceeded");
             }

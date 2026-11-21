@@ -3,8 +3,10 @@
 #include "ffn_runtime.h"
 #include "artifacts/ffn_artifact.h"
 
+#include <array>
 #include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <limits>
 #include <new>
@@ -391,6 +393,7 @@ struct WeightState {
 };
 
 struct FFNWeightState {
+    contracts::FFNWeightLayout layout = contracts::FFNWeightLayout::Native;
     PreparedWeight gate;
     PreparedWeight up;
     PreparedWeight down;
@@ -463,6 +466,11 @@ DeviceContext::DeviceContext() : state_(std::make_shared<detail::DeviceState>())
     state_->Initialize();
 }
 DeviceContext::~DeviceContext() = default;
+void DeviceContext::Reset() {
+    auto replacement = std::make_shared<detail::DeviceState>();
+    replacement->Initialize();
+    state_ = std::move(replacement);
+}
 RuntimeStats DeviceContext::stats() const { return state_->counters; }
 
 PreparedWeight::PreparedWeight(const DeviceContext &device, TensorBinding weights)
@@ -701,7 +709,27 @@ PreparedFFNWeights::PreparedFFNWeights(const DeviceContext &device,
     gate.Validate(shape.f, shape.d);
     up.Validate(shape.f, shape.d);
     down.Validate(shape.d, shape.f);
-    state_ = std::make_unique<detail::FFNWeightState>(device, gate, up, down);
+    if (spec.weight_layout == contracts::FFNWeightLayout::Transposed) {
+        std::array<TensorBinding, 3> source{gate, up, down};
+        std::array<std::vector<float>, 3> transposed;
+        for (std::size_t role = 0; role < source.size(); ++role) {
+            const auto &input = source[role];
+            auto &output = transposed[role];
+            output.resize(input.element_count);
+            for (std::size_t row = 0; row < input.rows; ++row) {
+                for (std::size_t col = 0; col < input.cols; ++col) {
+                    output[col * input.rows + row] = input.data[row * input.cols + col];
+                }
+            }
+        }
+        state_ = std::make_unique<detail::FFNWeightState>(
+            device, TensorBinding::Dense(transposed[0], shape.d, shape.f),
+            TensorBinding::Dense(transposed[1], shape.d, shape.f),
+            TensorBinding::Dense(transposed[2], shape.f, shape.d));
+    } else {
+        state_ = std::make_unique<detail::FFNWeightState>(device, gate, up, down);
+    }
+    state_->layout = spec.weight_layout;
 }
 PreparedFFNWeights::~PreparedFFNWeights() = default;
 PreparedFFNWeights::PreparedFFNWeights(PreparedFFNWeights &&) noexcept = default;
@@ -742,10 +770,12 @@ std::vector<float> FFNModule::Run(TensorBinding activation, const PreparedFFNWei
     const auto &gate = *weights.state_->gate.state_;
     const auto &up = *weights.state_->up.state_;
     const auto &down = *weights.state_->down.state_;
-    if (gate.device != state_->device || up.device != state_->device ||
+    const bool transposed = state_->ffn.weight_layout == contracts::FFNWeightLayout::Transposed;
+    if (weights.state_->layout != state_->ffn.weight_layout ||
+        gate.device != state_->device || up.device != state_->device ||
         down.device != state_->device ||
-        gate.rows != static_cast<std::size_t>(shape.f) ||
-        gate.cols != static_cast<std::size_t>(shape.d) ||
+        gate.rows != static_cast<std::size_t>(transposed ? shape.d : shape.f) ||
+        gate.cols != static_cast<std::size_t>(transposed ? shape.f : shape.d) ||
         up.rows != gate.rows || up.cols != gate.cols ||
         down.rows != gate.cols || down.cols != gate.rows) {
         throw std::invalid_argument("FFN weights belong to another context or shape");
@@ -768,6 +798,34 @@ std::vector<float> FFNModule::Run(TensorBinding activation, const PreparedFFNWei
         owner.poisoned = true;
         throw;
     }
+}
+
+
+std::vector<float> FFNModule::RunRows(TensorBinding activation,
+                                    const PreparedFFNWeights &weights) {
+    if (!state_ || !weights.state_)
+        throw std::invalid_argument("cannot use a moved-from FFN module or weights");
+    const auto &shape = state_->ffn.shape;
+    if (!activation.rows || activation.rows > static_cast<std::size_t>(shape.m))
+        throw std::invalid_argument("logical FFN rows exceed compiled capacity");
+    activation.Validate(activation.rows, shape.d);
+    if (activation.rows == static_cast<std::size_t>(shape.m)) return Run(activation, weights);
+    const auto prepare_start = Clock::now();
+    // A fresh zeroed tail is required for every invocation, including decreasing
+    // M on a reused graph. Pooling this staging storage is a separate M6 task.
+    std::vector<float> padded(static_cast<std::size_t>(shape.m * shape.d), 0.0f);
+    std::memcpy(padded.data(), activation.data, activation.element_count * sizeof(float));
+    const auto prepare_end = Clock::now();
+    auto output = Run(TensorBinding::Dense(padded, shape.m, shape.d), weights);
+    const auto crop_start = Clock::now();
+    output.resize(activation.element_count);
+    auto &stats = state_->device->counters;
+    stats.ffn_padded_rows += shape.m - activation.rows;
+    stats.ffn_cropped_rows += shape.m - activation.rows;
+    stats.ffn_boundary_ms +=
+        std::chrono::duration<double, std::milli>(prepare_end - prepare_start).count() +
+        std::chrono::duration<double, std::milli>(Clock::now() - crop_start).count();
+    return output;
 }
 
 } // namespace coral::runtime

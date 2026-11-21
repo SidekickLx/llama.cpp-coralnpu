@@ -121,6 +121,7 @@ struct Observation {
 };
 void Scheduled(ggml_backend_t cpu, int rows, int spelling,
                const std::string &mode, bool immutable) {
+    const auto planning_before = adapter::GetStats();
     Fixture f(cpu, rows, spelling, mode);
     Fixture reference(cpu, rows, spelling, mode);
     Buffer reference_storage(ggml_backend_alloc_ctx_tensors(reference.context.get(), cpu),
@@ -146,6 +147,9 @@ void Scheduled(ggml_backend_t cpu, int rows, int spelling,
     }
     Require(ggml_backend_sched_alloc_graph(scheduler.get(), f.graph), "allocate graph");
     const auto before = adapter::GetStats();
+    Require(before.jit.requests == planning_before.jit.requests &&
+            before.jit.worker_launches == planning_before.jit.worker_launches,
+            "reservation/allocation unexpectedly invoked JIT");
     const bool rejected = mode == "external-consumer" || mode == "external-view" ||
         mode == "callbacks" || mode == "callback-subdivision" || mode == "stale-metadata" ||
         mode == "missing" || mode == "disabled" || mode == "missing-member";
@@ -156,7 +160,9 @@ void Scheduled(ggml_backend_t cpu, int rows, int spelling,
         reference.gate->op_params[0] = GGML_PREC_F32;
     }
     for (int run = 0; run < 3; ++run) {
-        const int weight_seed = immutable ? 2 : 2 + run * 3;
+        const bool changed = mode == "weight-generation";
+        const int weight_seed = immutable && !changed ? 2 : 2 + run * 3;
+        if (changed && run > 0) adapter::InvalidateModelWeights();
         f.Set(run + 1, weight_seed);
         reference.Set(run + 1, weight_seed);
         Require(ggml_backend_graph_compute(cpu, reference.graph) == GGML_STATUS_SUCCESS, "CPU oracle");
@@ -177,9 +183,13 @@ void Scheduled(ggml_backend_t cpu, int rows, int spelling,
         Require(after.ffn_members_skipped - before.ffn_members_skipped ==
                     regions * (spelling ? 5 : 4), "wrong skipped member count");
         Require(after.ffn_weight_preparations - before.ffn_weight_preparations ==
-                    (immutable ? per_run : 3 * per_run), "wrong weight preparation count");
+                    (immutable && mode != "weight-generation" ? per_run : 3 * per_run), "wrong weight preparation count");
         Require(after.ffn_weight_cache_hits - before.ffn_weight_cache_hits ==
-                    (immutable ? 2 * per_run : 0), "wrong weight cache hit count");
+                    (immutable && mode != "weight-generation" ? 2 * per_run : 0), "wrong weight cache hit count");
+        if (mode == "weight-generation") {
+            Require(after.weight_cache_resets - before.weight_cache_resets == 2,
+                    "weight changes did not rebuild the device cache");
+        }
         if (mode == "multiple-splits") {
             Require(ggml_backend_sched_get_n_splits(scheduler.get()) >= 4, "missing multiple splits");
         }
@@ -225,20 +235,41 @@ void Corrupt(ggml_backend_t coral, ggml_backend_t cpu) {
     Require(Read(f.y) == marker, "corrupt region published output");
     Require(adapter::GetStats().runtime.calls_attempted == before.runtime.calls_attempted &&
             adapter::GetStats().matmuls == before.matmuls, "corrupt region replayed members");
+    const auto launches = adapter::GetStats().jit.worker_launches;
     Require(ggml_backend_sched_graph_compute(scheduler.get(), f.graph) == GGML_STATUS_FAILED,
             "failed backend allowed retry");
+    Require(adapter::GetStats().jit.worker_launches == launches, "failed backend relaunched a worker");
 }
 } // namespace
 int main(int argc, char **argv) {
     try {
-        Require(argc == 3, "Usage: coral-ffn-region-test MODE CATALOG");
+        Require(argc == 3 || argc == 4, "Usage: coral-ffn-region-test MODE CATALOG [JIT_CONFIG]");
         const std::string mode = argv[1];
+        if (mode == "jit-spec") {
+            Require(argc == 4, "jit-spec requires a configuration");
+            coral::jit::FFNJitClient client(argv[3]);
+            const std::vector<coral::contracts::FFNShape> invalid{
+                {0, 64, 172}, {-1, 64, 172}, {1, 0, 172}, {1, 64, 0},
+                {536870912, 64, 172}};
+            for (const auto shape : invalid) {
+                bool rejected = false;
+                try {
+                    (void)client.Specification(shape);
+                } catch (const std::invalid_argument &) {
+                    rejected = true;
+                }
+                Require(rejected, "bucket policy concealed an invalid logical shape");
+            }
+            std::cout << "{\"status\":\"passed\",\"invalid_logical_shapes\":5}\n";
+            return 0;
+        }
         Observation events;
         adapter::Options options;
         options.artifact_directory = argv[2];
+        if (argc == 4) options.jit_configuration = argv[3];
         options.evaluation_callbacks = mode == "callbacks";
         options.enable_ffn = mode != "disabled";
-        options.immutable_model_weights = mode == "immutable";
+        options.immutable_model_weights = mode == "immutable" || mode == "weight-generation";
         options.ffn_trace = Observation::FFN;
         options.trace_user_data = &events;
         adapter::Register(options);
@@ -250,7 +281,7 @@ int main(int argc, char **argv) {
         }
         // Each scheduled fixture destroys its backend/cache before its weights.
         // Independent contexts must prepare their own snapshots.
-        if (mode == "corrupt") {
+        if (mode == "corrupt" || mode == "jit-failure") {
             Backend coral(ggml_backend_dev_init(ggml_backend_dev_by_name("CORAL"), nullptr),
                           ggml_backend_free);
             Corrupt(coral.get(), cpu.get());
@@ -261,7 +292,7 @@ int main(int argc, char **argv) {
             for (const auto &name : cases) {
                 for (int rows : {1, 5}) {
                     for (int spelling = 0; spelling < 3; ++spelling) {
-                        Scheduled(cpu.get(), rows, spelling, name, mode == "immutable");
+                        Scheduled(cpu.get(), rows, spelling, name, options.immutable_model_weights);
                     }
                 }
             }
@@ -284,6 +315,10 @@ int main(int argc, char **argv) {
                   << ",\"members_skipped\":" << stats.ffn_members_skipped
                   << ",\"dispatches\":" << stats.runtime.coral_dispatches
                   << ",\"instructions\":" << stats.runtime.kernel_instructions
+                  << ",\"jit_requests\":" << stats.jit.requests
+                  << ",\"jit_worker_launches\":" << stats.jit.worker_launches
+                  << ",\"jit_compilations\":" << stats.jit.compilations
+                  << ",\"jit_disk_hits\":" << stats.jit.disk_hits
                   << ",\"max_abs_error\":" << maximum_error << "}\n";
         return 0;
     } catch (const std::exception &error) {

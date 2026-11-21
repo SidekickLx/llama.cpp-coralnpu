@@ -22,7 +22,9 @@ def distribution(values):
     return {"samples": len(values), "median": statistics.median(values),
             "minimum": min(values), "maximum": max(values)}
 
-def inspect_regions(output, expected):
+def inspect_regions(output, expected, dispatch_counts=None):
+    if dispatch_counts is None:
+        dispatch_counts = {1: 6, 5: 3}
     trace = lines(output / "trace.jsonl")
     regions = [row for row in trace if row["kind"] == "ffn_region"]
     require(len(regions) == expected, "wrong complete-region execution count")
@@ -35,7 +37,7 @@ def inspect_regions(output, expected):
             require(row["m"] in (1, 5) and (step == 0 or row["m"] == 1), "wrong profile")
             ops = [member["op"] for member in row["members"]]
             require(ops == ["MUL_MAT", "MUL_MAT", "GLU", "MUL_MAT"], "wrong FFN coverage")
-            require(row["dispatches"] == (6 if row["m"] == 1 else 3), "unexpected dispatch count")
+            require(row["dispatches"] == dispatch_counts[row["m"]], "unexpected dispatch count")
             names.extend(member["name"] for member in row["members"])
         require(len(set(names)) == len(names), "overlapping regions")
         individual = [row["name"] for row in trace

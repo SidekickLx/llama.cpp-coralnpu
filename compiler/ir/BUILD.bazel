@@ -20,8 +20,11 @@ cc_library(
 
 cc_binary(
     name = "coral-stablehlo-tool",
-    srcs = ["stablehlo_tool.cc"],
+    srcs = ["stablehlo_tool.cc", "ggml_snapshot.cc"],
+    copts = ["-fexceptions"],
     deps = [
+        ":ggml_importer",
+        "//:strict_json",
         ":stablehlo_program",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",

@@ -8,6 +8,6 @@ namespace coral::compiler {
 // Callers validate types/shapes before these standard operation constructors.
 mlir::Value BuildDenseDot(mlir::OpBuilder &builder, mlir::Location loc,
                          mlir::RankedTensorType result, mlir::Value activation,
-                         mlir::Value weight);
+                         mlir::Value weight, bool transposed_weight = false);
 mlir::Value BuildSilu(mlir::OpBuilder &builder, mlir::Location loc, mlir::Value input);
 } // namespace coral::compiler

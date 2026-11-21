@@ -33,7 +33,10 @@
       ],
       "properties": {
         "abi": {
-          "const": "coral.ffn.f32.v1"
+          "enum": [
+            "coral.ffn.f32.v1",
+            "coral.ffn.f32.weights-transposed.v1"
+          ]
         },
         "entry": {
           "const": "ffn"

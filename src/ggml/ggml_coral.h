@@ -3,6 +3,7 @@
 
 #include "ggml-backend.h"
 #include "runtime/matmul_runtime.h"
+#include "jit/ffn_jit.h"
 #include <cstdint>
 #include <string>
 
@@ -47,11 +48,17 @@ struct Options {
     // Optional ffn.tsv entries enable complete regions. Keeping this false
     // provides the same member path for diagnostics and numerical comparison.
     bool enable_ffn = true;
+    // Explicit opt-in. Empty preserves compiler-free AOT behavior. Only
+    // missing complete FFN packages trigger JIT; member support is unchanged.
+    std::string jit_configuration;
     void (*ffn_trace)(const FFNEvent &, void *) = nullptr;
 };
 
 struct Stats {
     runtime::RuntimeStats runtime;
+    jit::Stats jit;
+    double jit_initialization_ms = 0;
+    std::uint64_t ffn_module_cache_hits = 0;
     std::uint64_t graph_calls = 0;
     std::uint64_t graph_optimizations = 0;
     std::uint64_t ffn_candidates = 0;
@@ -67,6 +74,7 @@ struct Stats {
     std::uint64_t pointwise_calls = 0;
     std::uint64_t weight_cache_hits = 0;
     std::uint64_t weight_preparations = 0;
+    std::uint64_t weight_cache_resets = 0;
     std::uint64_t failures = 0;
 };
 
@@ -82,6 +90,11 @@ bool CompatiblePointwise(const ggml_tensor *op,
 // Reads profiles.tsv and optional pointwise.tsv/ffn.tsv indexes eagerly; supports_op only
 // queries their in-memory indexes. Missing members stay on another backend.
 void Register(const Options &options);
+// Between synchronous graph calls, before modifying/replacing immutable model
+// weights. Every backend lazily rebuilds its device and all runtime caches on
+// the next call, including the simulator's read-only binding cache.
+// Callers still own weight storage lifetimes; never mutate during execution.
+void InvalidateModelWeights();
 Stats GetStats();
 const std::string &LastError();
 

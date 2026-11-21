@@ -69,6 +69,11 @@ FFNRunnerOptions ParseFFNOptions(int argc, char **argv, bool coral) {
         if (flag == "--inputs") result.inputs.push_back(value);
         else if (flag == "--output") result.output = value;
         else if (flag == "--artifact" && coral) result.artifact = value;
+        else if (flag == "--weight-layout" && coral) {
+            Require(value == "native" || value == "transposed", "unknown FFN weight layout");
+            if (value == "transposed") result.weight_layout = contracts::FFNWeightLayout::Transposed;
+        }
+        else if (flag == "--capacity-m" && coral) result.capacity_m = Count(value, kMaxElements);
         else if (flag == "--repeat") result.repeat = Count(value, 100);
         else if (flag == "--recreate" && coral) result.recreate = Count(value, 16);
         else throw std::invalid_argument("unknown option: " + flag);

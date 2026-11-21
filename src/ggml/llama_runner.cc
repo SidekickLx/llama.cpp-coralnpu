@@ -38,6 +38,7 @@ struct Arguments {
     int decode = 3;
     std::string observation = "nodes";
     std::string ffn = "auto";
+    fs::path jit_config;
 };
 
 void Usage() {
@@ -47,7 +48,8 @@ void Usage() {
         << "  --artifacts DIRECTORY   Required only in Coral mode (AOT profiles.tsv + VMFBs).\n"
         << "  --observation nodes|backend   Backend mode omits evaluation callbacks.\n"
         << "  --ffn auto|off   Use optional ffn.tsv regions or retain member execution.\n"
-        << "A replay file supplies both prompt and decode input tokens. No compiler is invoked.\n";
+        << "  --jit-config FILE   Opt in to FFN compilation on persistent cache misses.\n"
+        << "A replay file supplies both prompt and decode input tokens. AOT mode invokes no compiler.\n";
 }
 
 Arguments Parse(int argc, char **argv) {
@@ -77,6 +79,8 @@ Arguments Parse(int argc, char **argv) {
             args.observation = value;
         } else if (key == "--ffn") {
             args.ffn = value;
+        } else if (key == "--jit-config") {
+            args.jit_config = value;
         } else if (key == "--tokens") {
             args.tokens = value;
         } else if (key == "--prompt") {
@@ -89,6 +93,10 @@ Arguments Parse(int argc, char **argv) {
         } else {
             throw std::invalid_argument("unknown option: " + key);
         }
+    }
+    if (!args.jit_config.empty() &&
+        (args.mode != "coral" || args.observation != "backend" || args.ffn != "auto")) {
+        throw std::invalid_argument("--jit-config requires Coral backend observation and --ffn auto");
     }
     if (args.ffn != "auto" && args.ffn != "off") {
         throw std::invalid_argument("--ffn must be auto or off");
@@ -186,6 +194,14 @@ void WriteStats(std::ostream &out, const adapter::Stats &after, const adapter::S
         << ",\"ffn_candidates\":" << after.ffn_candidates - before.ffn_candidates
         << ",\"ffn_preparation_plans\":" << after.ffn_preparation_plans - before.ffn_preparation_plans
         << ",\"ffn_rejections\":" << after.ffn_rejections - before.ffn_rejections
+        << ",\"jit_requests\":" << after.jit.requests - before.jit.requests
+        << ",\"jit_worker_launches\":" << after.jit.worker_launches - before.jit.worker_launches
+        << ",\"jit_compilations\":" << after.jit.compilations - before.jit.compilations
+        << ",\"jit_disk_hits\":" << after.jit.disk_hits - before.jit.disk_hits
+        << ",\"jit_recoveries\":" << after.jit.recoveries - before.jit.recoveries
+        << ",\"jit_ms\":" << after.jit.elapsed_ms - before.jit.elapsed_ms
+        << ",\"jit_initialization_ms\":" << after.jit_initialization_ms - before.jit_initialization_ms
+        << ",\"ffn_module_cache_hits\":" << after.ffn_module_cache_hits - before.ffn_module_cache_hits
         << ",\"ffn_calls\":" << after.ffn_calls - before.ffn_calls
         << ",\"ffn_members_skipped\":" << after.ffn_members_skipped - before.ffn_members_skipped
         << ",\"ffn_missing_artifacts\":" << after.ffn_missing_artifacts - before.ffn_missing_artifacts
@@ -208,6 +224,10 @@ void WriteStats(std::ostream &out, const adapter::Stats &after, const adapter::S
         << ",\"failed_dispatches\":" << a.failed_dispatches - b.failed_dispatches
         << ",\"observer_errors\":" << a.observer_errors - b.observer_errors
         << ",\"binding_allocations\":" << a.binding_allocations - b.binding_allocations
+        << ",\"ffn_padded_rows\":" << a.ffn_padded_rows - b.ffn_padded_rows
+        << ",\"ffn_cropped_rows\":" << a.ffn_cropped_rows - b.ffn_cropped_rows
+        << ",\"ffn_boundary_ms\":" << a.ffn_boundary_ms - b.ffn_boundary_ms
+        << ",\"weight_cache_resets\":" << after.weight_cache_resets - before.weight_cache_resets
         << ",\"logical_upload_bytes\":" << a.upload_bytes - b.upload_bytes
         << ",\"logical_download_bytes\":" << a.download_bytes - b.download_bytes
         << ",\"module_load_ms\":" << a.module_load_ms - b.module_load_ms
@@ -530,6 +550,7 @@ void Run(const Arguments &args) {
         options.plan_trace = Trace::OnPlan;
         options.ffn_trace = Trace::OnFFN;
         options.enable_ffn = args.ffn != "off";
+        options.jit_configuration = args.jit_config.string();
         options.evaluation_callbacks = !trace.backend_observation;
         adapter::Register(options);
     }

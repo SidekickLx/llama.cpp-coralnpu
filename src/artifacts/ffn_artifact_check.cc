@@ -18,9 +18,15 @@ int main(int argc, char **argv) {
             std::cout << coral::artifacts::RuntimeCompatibilityJSON() << '\n';
             return 0;
         }
-        if (argc != 5) throw std::invalid_argument("Usage: artifact-check DIRECTORY|--describe M D F");
+        if (argc != 5 && argc != 6)
+            throw std::invalid_argument("Usage: artifact-check DIRECTORY|--describe M D F [native|transposed]");
         coral::contracts::FFNCompileSpec spec;
         spec.shape = {Dimension(argv[2]), Dimension(argv[3]), Dimension(argv[4])};
+        if (argc == 6) {
+            const std::string layout(argv[5]);
+            if (layout == "transposed") spec.weight_layout = coral::contracts::FFNWeightLayout::Transposed;
+            else if (layout != "native") throw std::invalid_argument("unknown FFN weight layout");
+        }
         if (std::string(argv[1]) == "--describe") {
             std::cout << coral::artifacts::DescribeFFNJSON(spec) << '\n';
         } else {

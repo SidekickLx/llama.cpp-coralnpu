@@ -9,6 +9,7 @@ struct FFNWeightState;
 }
 
 // Immutable owning snapshots of W_gate[F,D], W_up[F,D], W_down[D,F].
+// Native bindings are transposed once when the requested VM ABI requires it.
 // All three bindings are validated before any upload. Snapshots may be reused
 // by modules with different M and identical D/F on the same DeviceContext.
 // Borrowed host bindings need remain valid only until construction returns.
@@ -47,6 +48,11 @@ class FFNModule {
     // Invalid bindings are rejected before execution. An execution failure
     // poisons the shared context and returns no partial result or CPU replay.
     std::vector<float> Run(TensorBinding activation, const PreparedFFNWeights &);
+
+    // Explicit FFN-only boundary adapter: accept 1 <= logical M <= compiled M,
+    // zero-pad X's token rows and crop Y to logical M. Feature/reduction axes
+    // are unchanged. Run() keeps its original exact-shape validation.
+    std::vector<float> RunRows(TensorBinding activation, const PreparedFFNWeights &);
 
   private:
     std::unique_ptr<detail::ModuleState> state_;

@@ -10,6 +10,11 @@ namespace coral::contracts {
 inline constexpr std::uint32_t kFFNContractVersion = 1;
 inline constexpr char kFFNAbi[] = "coral.ffn.f32.v1";
 inline constexpr char kFFNEntryPoint[] = "ffn";
+inline constexpr char kFFNTransposedAbi[] = "coral.ffn.f32.weights-transposed.v1";
+
+// Physical layout of the VM arguments. Public runtime preparation always
+// accepts native GGML weights and owns the conversion into this layout.
+enum class FFNWeightLayout { Native, Transposed };
 
 enum class FFNNumericPolicy {
     // F32 tensors and dot accumulation; no reduced-precision substitution.
@@ -28,6 +33,7 @@ struct FFNCompileSpec {
     std::uint32_t contract_version = kFFNContractVersion;
     FFNShape shape;
     FFNNumericPolicy numeric_policy = FFNNumericPolicy::F32NoFastMathV1;
+    FFNWeightLayout weight_layout = FFNWeightLayout::Native;
 };
 
 // Positional function ABI. Weights are external inputs, never embedded values.

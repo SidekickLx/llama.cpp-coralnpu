@@ -164,6 +164,46 @@ def prepare(args):
         write_json(expected / (name + ".json"), reference)
         profiles.append({"name": name, "shape": list(shape), "source_case": source.parent.name})
 
+    optimized_profiles = []
+    optimized_model = False
+    if args.optimized_model_evidence:
+        source = args.optimized_model_evidence.resolve(strict=True)
+        require(json.loads((source / "report.json").read_text())["status"] == "passed",
+                "optimized model evidence has not passed")
+        destination = root / "data/optimized-catalog"
+        destination.mkdir()
+        for index in ("profiles.tsv", "pointwise.tsv"):
+            copy_catalog(source / "artifacts", destination, index)
+        copy_file(source / "artifacts/ffn.tsv", destination / "ffn.tsv")
+        names = {line.split()[3] for line in (destination / "ffn.tsv").read_text().splitlines()[1:]
+                 if line.strip() and not line.startswith("#")}
+        for name in names:
+            require(Path(name).name == name and name not in (".", ".."), "invalid optimized package")
+            copy_package(source / "artifacts" / name, destination / name)
+        copy_file(source / "cpu/tokens.txt", root / "data/optimized-tokens.txt")
+        shutil.copytree(source / "regions-0", expected / "optimized-model")
+        optimized_model = True
+    if args.optimized_ffn_evidence:
+        source = args.optimized_ffn_evidence.resolve(strict=True)
+        data = json.loads((source / "report.json").read_text())
+        require(data["status"] == "passed", "optimized FFN evidence has not passed")
+        # Both ABIs, both a pure P1 exact core and P2 padded real-model cases.
+        for case in data["cases"]:
+            m, d, f = case["shape"]
+            if (d == 3 and m != 1) or d not in (3, 64):
+                continue
+            name = "optimized-" + case["case"]
+            layout = "transposed" if case["case"].startswith("transposed-") else "native"
+            copy_package(source / "cache/entries" / case["key"], root / "data/ffn" / name)
+            inputs = source / case["case"] / "inputs.json"
+            copy_file(inputs, root / "data/inputs" / (name + ".json"))
+            reference = {}
+            for engine in ("cpu", "coral"):
+                reference[engine] = json.loads((inputs.parent / (engine + ".json")).read_text())["cases"][0]["outputs"][0]
+            write_json(expected / (name + ".json"), reference)
+            optimized_profiles.append({"name": name, "shape": [m, d, f],
+                                       "capacity_m": case["capacity_m"], "layout": layout})
+
     compiler = ROOT / "repos/coralnpu-compiler/bazel-bin/external/iree_core+/tools/iree-compile"
     host_compilers = [compiler, Path("/usr/bin/clang-19")]
     snapshots = []
@@ -173,7 +213,8 @@ def prepare(args):
     absent = {"/bin/sh", "/usr/bin/python3", "/bin/iree-compile", "/usr/bin/iree-compile",
               "/usr/local/bin/iree-compile", "/usr/bin/clang", "/usr/bin/clang-19",
               "/usr/bin/gcc", "/usr/bin/cc", "/usr/bin/bazel",
-              str(ROOT / "compiler/compile_ffn.py"), str(ROOT / "build/m3/coral-stablehlo-tool")}
+              str(ROOT / "compiler/compile_ffn.py"), str(ROOT / "compiler/jit_worker.py"),
+              str(ROOT / "build/m3/coral-stablehlo-tool")}
     for path in host_compilers:
         absent.add(str(path))
         absent.add(str(path.resolve()))
@@ -188,7 +229,8 @@ def prepare(args):
     manifest = inventory(root)
     write_json(work / "inventory.json", manifest)
     config = {"schema": "coral.aot.deployment.v1", "llama_revision": revision,
-              "profiles": profiles, "dependencies": dependencies, "host_compilers": snapshots,
+              "profiles": profiles, "optimized_profiles": optimized_profiles,
+              "optimized_model": optimized_model, "dependencies": dependencies, "host_compilers": snapshots,
               "inventory_sha256": digest(work / "inventory.json"),
               "model_sha256": digest(model), "prepare_uid": os.getuid(), "prepare_gid": os.getgid()}
     write_json(work / "deployment.json", config)
@@ -301,7 +343,7 @@ def verify(args):
             require(summary["stats"]["calls_completed"] == (104 if fused else 164), "wrong VM count")
         model_results[mode] = {"max_abs_error_vs_cpu": error, "stats": summary["stats"]}
     ffn_results = []
-    for profile in config["profiles"]:
+    for profile in config["profiles"] + config.get("optimized_profiles", []):
         name = profile["name"]
         expected = json.loads((work / "expected" / (name + ".json")).read_text())
         for reload in (False, True):
@@ -309,7 +351,9 @@ def verify(args):
             result, trace = isolated(work, "/bin/coral-ffn-runner",
                 ["--artifact", "/data/ffn/" + name, "--inputs", "/data/inputs/" + name + ".json",
                  "--repeat", "1" if reload else "2", "--recreate", "1" if reload else "2",
-                 "--output", "/output/" + label + ".json"], "ffn-" + label)
+                 "--output", "/output/" + label + ".json",
+                 "--weight-layout", profile.get("layout", "native"),
+                 "--capacity-m", str(profile.get("capacity_m", profile["shape"][0]))], "ffn-" + label)
             evidence["ffn-" + label] = trace
             report = json.loads((root / "output" / (label + ".json")).read_text())
             require(report["status"] == "passed" and report["shape"] == profile["shape"], "FFN failed")
@@ -328,6 +372,25 @@ def verify(args):
                 require(stats["coral_dispatches"] == stats["instruction_samples"] > 0, "missing FFN samples")
             ffn_results.append({"profile": name, "reload": reload, "comparison": comparison,
                                 "cycles": report["cycles"]})
+    optimized_model_runs = []
+    if config.get("optimized_model", False):
+        _, expected_logits = read_run(work / "expected/optimized-model", "coral")
+        for repeat in range(2):
+            label = "optimized-model-" + str(repeat)
+            result, trace = isolated(work, "/bin/coral-llama-runner",
+                ["--mode", "coral", "--model", "/data/model.gguf",
+                 "--artifacts", "/data/optimized-catalog", "--observation", "backend",
+                 "--tokens", "/data/optimized-tokens.txt", "--output", "/output/" + label], label)
+            evidence[label] = trace
+            summary, actual = read_run(root / "output" / label, "coral")
+            require(actual == expected_logits, "optimized deployment changed logits")
+            error = compare_logits(actual, reference)
+            inspect_regions(root / "output" / label, 20, {1: 3, 5: 3})
+            require(summary["stats"]["ffn_module_cache_hits"] == 19 and
+                    summary["stats"]["ffn_padded_rows"] == 124 and
+                    summary["stats"]["jit_requests"] == 0, "optimized deployment did not reuse capacity")
+            optimized_model_runs.append({"max_abs_error_vs_cpu": error, "stats": summary["stats"]})
+
     result, trace = isolated(work, "/bin/coral-matmul-runner",
         ["--module", "/data/catalog/m1_k64_n172.vmfb", "--m", "1", "--k", "64", "--n", "172",
          "--repeat", "3", "--recreate", "2", "--self-test"], "matmul")
@@ -364,7 +427,9 @@ def verify(args):
               "deployed_files": len(expected_inventory),
               "deployed_bytes": sum(row["bytes"] for row in expected_inventory.values()),
               "model_runs": model_results, "ffn_profiles": len(config["profiles"]),
-              "ffn_runs": ffn_results, "matmul": matmul, "process_evidence": evidence}
+              "ffn_runs": ffn_results, "optimized_model_runs": optimized_model_runs,
+              "optimized_ffn_profiles": len(config.get("optimized_profiles", [])),
+              "matmul": matmul, "process_evidence": evidence}
     write_json(work / "report.json", report)
     print(json.dumps({"status": "passed", "report": str(work / "report.json"),
                       "environment": environment, "ffn_profiles": len(config["profiles"]),
@@ -379,6 +444,8 @@ def main():
     prep.add_argument("--model-evidence", type=Path, required=True)
     prep.add_argument("--ffn-evidence", type=Path, required=True)
     prep.add_argument("--aot-evidence", type=Path, required=True)
+    prep.add_argument("--optimized-model-evidence", type=Path)
+    prep.add_argument("--optimized-ffn-evidence", type=Path)
     prep.add_argument("--output-root", type=Path, default=Path("build/m4-deployment-results"))
     check = commands.add_parser("verify", help="root only for namespace/chroot setup; runners use UID 65534")
     check.add_argument("--deployment", type=Path, required=True)

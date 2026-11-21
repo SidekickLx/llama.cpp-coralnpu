@@ -298,6 +298,20 @@ GGML backend；真实模型执行 20 次完整 FFN，和逐算子路径 logits �
 
 ## M5 JIT 缓存与两项 IR 优化
 
+Implementation status (2026-11-20): steps 1–6 are implemented and accepted:
+the unified canonical StableHLO compile service, validated persistent cache,
+and opt-in synchronous FFN compiler worker are connected to GGML execution.
+A cold real-model run compiles the two exact FFN profiles once each; a new
+process reuses both artifacts without launching a child process. P1 is also implemented and accepted (versioned prepared-weight ABI, explicit
+weight invalidation, official-reference/Coral/model and JIT matrix checks).
+P2 is implemented and accepted for independent FFN token rows, with standard
+Pad/Core/Crop reference evidence, bucket reuse and boundary rejection tests.
+The final combined regression/performance audit and 41-process compiler-free
+deployment gate passed. Optimizations remain opt-in; exact/native is the default.
+See [optimization evidence](m5-optimization-test-report.md). See [architecture](m5-jit.md) and [acceptance evidence](m5-jit-test-report.md).
+Member capability and fusion legality still gate JIT; the pinned llama.cpp
+checkout remains unmodified.
+
 **任务**
 
 1. 统一入口 `compile_region(canonical_ir, profile, target, numeric_policy)`，由 AOT CLI 和 JIT miss 共用。
@@ -701,11 +715,11 @@ driver 预算假设已有可重建的 guest kernel 与设备树环境，并在 D
 
 - [ ] AOT 产物跨进程重载，禁用 compiler 仍可执行。
 
-- [ ] JIT 首次 miss、热命中和版本失效可观察。
+- [x] JIT 首次 miss、热命中和版本失效可观察。
 
 - [ ] 同 shape 不同权重不串数据。
 
-- [ ] 两项 IR pass 有前后 IR、数值和结构证据。
+- [x] 两项 IR pass 有前后 IR、数值和结构证据。
 
 - [ ] 权重准备、staging、dispatch 和内存复用有分层统计。
 
