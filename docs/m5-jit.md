@@ -4,20 +4,24 @@
 
 The common entry point is
 `compile_region(canonical_ir, profile, target, numeric_policy)` in
-`compiler/region_service.py`. `profile` is the exact (M, D, F) tuple.
+`compiler/region_service.py`. `profile` is the compiled (M, D, F) tuple;
+with P2, its M is the selected capacity B. The optional `weight_layout`
+keyword selects the checked physical ABI.
 `canonical_ir` contains normalized standard StableHLO, with four positional
 F32 inputs and external weights. `target` is the complete runtime compatibility
 object; the numeric policy remains `f32-no-fast-math-v1`.
 
-The AOT CLI first calls `canonicalize_region` on actual imported StableHLO.
-That operation uses the existing verifier and FFN semantic admission.
+The AOT CLI calls `optimize_region` on actual imported StableHLO, using the
+existing verifier and full FFN semantic admission. It optionally prepares the
+P1 weight ABI and applies `specialize_rows` for P2. `canonicalize_region`
+remains available for callers that only normalize the original ABI.
 The common compile entry rechecks canonicality, compiles, verifies Coral-only
 placement, constructs the existing M4 manifest and invokes the C++ artifact
 checker before atomic publication. Unknown targets or policies are rejected.
 Diagnostics and original source remain in sibling evidence directories.
 M4 packages and runtime ABI remain compatible.
 
-JIT will use this same entry on a persistent-cache miss. Neither a shape-only
+JIT uses this same entry on a persistent-cache miss. Neither a shape-only
 template nor a second compilation pipeline is introduced.
 
 The first service gate passed: AOT and direct-service callers produced matching
@@ -73,7 +77,8 @@ flowchart TD
     C -- no --> W[Separate synchronous Python worker]
     W --> I[Existing per-operator GGML to StableHLO importer]
     I --> V[StableHLO verifier and FFN semantic admission]
-    V --> K{Canonical artifact cache hit?}
+    V --> O[Optional P1 layout and P2 row capacity]
+    O --> K{Canonical artifact cache hit?}
     K -- yes --> X[Validate existing package]
     K -- no --> P[Shared compile_region service]
     P --> X
@@ -103,7 +108,7 @@ There are three code-cache levels:
 1. A device-local loaded-module map reuses the exact FFN program within the
    running backend. Every execution still passes live guards.
 2. A persistent request index maps a GGML snapshot plus pinned environment
-   identity to its verified canonical artifact. A fresh-process hit validates
+   identity plus optimization policy to its verified canonical artifact. A fresh-process hit validates
    the artifact in C++ without starting a worker, Python or a compiler.
 3. The canonical artifact cache deduplicates equivalent GGML spellings after
    import/normalization. A new source spelling may launch a worker to import,
@@ -189,12 +194,13 @@ python tests/ggml/verify_ffn_jit.py \
 The gate traces actual process execution, compares CPU/JIT logits, checks
 cross-process hits and changed activations, injects corrupt packages/indexes,
 stale environments, failed workers and timeouts, and repeats scheduler
-legality/lifetime tests with JIT enabled. P1 weight-layout optimization and
-P2 M buckets remain the next M5 steps.
+legality/lifetime tests with JIT enabled. Add `--weight-layout transposed` and
+optionally `--m-buckets 8` to exercise the optimization paths with the same
+failure matrix.
 
 The completed steps 1–3 acceptance, measured costs and raw evidence locations
 are recorded in [the test report](m5-jit-test-report.md).
 
-P1's optional prepared-weight ABI and invalidation interface are documented in
+P1's prepared-weight ABI and P2's row-capacity interface are documented in
 [m5-optimizations.md](m5-optimizations.md), with numerical and performance
 [evidence](m5-optimization-test-report.md).

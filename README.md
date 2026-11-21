@@ -48,6 +48,10 @@ is reserved for SoC integration; completing M2 does not constitute that release.
 - **Verified FFN frontend:** direct GGML-to-StableHLO import for static F32
   matmul, SiLU, multiply and complete SwiGLU FFNs, with fixed input roles,
   standard verification and the official StableHLO reference interpreter.
+- **Optional FFN optimizations:** versioned prepared-weight layouts and verified
+  token-row buckets, with explicit weight invalidation and shared capacity code.
+  See the [optimization guide](docs/m5-optimizations.md) and
+  [acceptance/performance report](docs/m5-optimization-test-report.md).
 - **Numerical and failure tests:** fixed-token CPU/Coral comparison, adapter
   capability boundaries, mixed graphs, mutable weights, and error propagation.
 
@@ -56,11 +60,12 @@ validates persistent artifacts and invokes an isolated compiler worker only
 on a cache miss. [Steps 1–3 acceptance](docs/m5-jit-test-report.md) covers real
 model inference, cache recovery and default compiler-free AOT regression.
 Loaded modules remain in the inference process. Eligible
-regions still require existing member capability and exact F32 profiles.
+regions still require existing member capability and static F32 profiles;
+optional row buckets share compiled capacities without changing this support gate.
 
 Current limits: Linux x86_64, single-threaded diagnostic inference, synchronous
 execution, and a validated tiny F32 model. Attention and other unsupported
-operations still run on the CPU. General operator JIT, M buckets, W8A8/W4A8, concurrent requests, and
+operations still run on the CPU. General operator JIT, W8A8/W4A8, concurrent requests, and
 SoC/Linux-driver integration remain future work.
 There is no standalone installable backend package or general chat CLI yet.
 
@@ -648,6 +653,21 @@ JIT is disabled by default. Use `--jit-config` with backend observation and a
 member catalog to compile missing complete FFN packages on demand.
 Existing AOT entries take precedence.
 
+P1/P2 are also opt-in. After the setup above, create a new local configuration:
+
+~~~bash
+python compiler/jit_worker.py configure \
+  --cache build/ffn-cache --output build/jit-p1-p2.json \
+  --weight-layout transposed --m-buckets 1 4 8
+~~~
+
+Pass that file to the runner's `--jit-config` option with a member-only catalog.
+Decode M=1 stays exact; prefill can reuse a larger capacity. The
+[guide](docs/m5-optimizations.md) covers AOT catalogs, runtime boundaries and
+weight invalidation. These policies have profile-dependent costs; exact/native
+remains the default. The [combined acceptance](docs/m5-optimization-test-report.md)
+includes CPU/StableHLO/Coral checks and compiler-free deployment.
+
 ### Performance measurements
 
 After correctness passes, measure repeated CPU/Coral runs on the same inputs:
@@ -752,8 +772,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Include numerical results and actual
 execution evidence for backend changes. Keep machine-specific paths,
 credentials, models, upstream checkouts, and generated binaries out of commits.
 
-Future work includes weight-layout optimization and M bucket specialization,
-W8A8 and packed W4A8 device execution, and SoC/Linux-driver integration.
+Future work includes device memory/staging reuse, W8A8 and packed W4A8 device
+execution, concurrent request handling, and SoC/Linux-driver integration.
 The [project plan](docs/project-plan.md) records the scope. Release numbers
 will be assigned separately from development milestones.
 

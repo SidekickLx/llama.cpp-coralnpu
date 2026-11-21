@@ -245,6 +245,24 @@ int main(int argc, char **argv) {
     try {
         Require(argc == 3 || argc == 4, "Usage: coral-ffn-region-test MODE CATALOG [JIT_CONFIG]");
         const std::string mode = argv[1];
+        if (mode == "jit-spec") {
+            Require(argc == 4, "jit-spec requires a configuration");
+            coral::jit::FFNJitClient client(argv[3]);
+            const std::vector<coral::contracts::FFNShape> invalid{
+                {0, 64, 172}, {-1, 64, 172}, {1, 0, 172}, {1, 64, 0},
+                {536870912, 64, 172}};
+            for (const auto shape : invalid) {
+                bool rejected = false;
+                try {
+                    (void)client.Specification(shape);
+                } catch (const std::invalid_argument &) {
+                    rejected = true;
+                }
+                Require(rejected, "bucket policy concealed an invalid logical shape");
+            }
+            std::cout << "{\"status\":\"passed\",\"invalid_logical_shapes\":5}\n";
+            return 0;
+        }
         Observation events;
         adapter::Options options;
         options.artifact_directory = argv[2];

@@ -281,6 +281,8 @@ FFNJitClient::~FFNJitClient() = default;
 contracts::FFNCompileSpec FFNJitClient::Specification(contracts::FFNShape shape) const {
     contracts::FFNCompileSpec spec;
     spec.shape = shape;
+    // Reject invalid logical shapes before a positive bucket could hide them.
+    contracts::ValidateFFNSpec(spec);
     for (const auto &value : state_->config.at("optimization").at("m_buckets")) {
         const auto capacity = value.get<std::int64_t>();
         if (shape.m <= capacity) {

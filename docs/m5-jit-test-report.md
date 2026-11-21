@@ -9,7 +9,8 @@ Implemented milestones:
 3. Opt-in GGML FFN JIT, isolated synchronous compiler worker, persistent request
    index and reuse of loaded modules in the existing VM/device.
 
-P1 weight-layout preprocessing and P2 M buckets are not implemented here.
+This report records the steps 1–3 baseline. P1/P2 and the final combined M5
+acceptance are now complete; see [the optimization report](m5-optimization-test-report.md).
 No upstream llama.cpp patch or scheduler observer was added. The locked
 llama.cpp checkout remains clean at
 `9fba51d2c9a1b5cb5f0c47986c031334e2d7663a`.

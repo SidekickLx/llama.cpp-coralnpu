@@ -105,3 +105,115 @@ module cannot conceal the error. No final inference report is published.
 The public AOT CLI with `--m-buckets 1 8` and standalone runner with
 `--capacity-m 8` also passed three invocations, retaining
 `build/m5-p2-cli-artifact` and `build/m5-p2-cli-run.json`.
+
+## Final regression and compiler-free deployment
+
+The final implementation passed all default-path regressions in
+`build/m5-final-regression-ugtnl5aj/checks.json`:
+
+- Rebuilt all runtime/test targets; CTest **5/5**.
+- Shared service, persistent cache invalidation/repair and failure retries.
+- AOT admission: 14 normalized fixtures, 10 rejected inputs, six real compiled profiles.
+- Runtime: six profiles (including M=16/32), 86 numerical calls and nine negative gates.
+- GGML: 84 scheduled graphs executed three times each, 11 catalog rejections.
+- Five paired real-model CPU/member/full-region runs.
+
+The strict artifact boundary additionally passed **54 negative cases** in
+`build/m5-final-contract-results/contract-ox_id1nz`.
+The complete default native/exact JIT matrix passed in
+`build/m5-jit-7pkfekk1/report.json`, including zero warm child executions.
+The upstream llama.cpp checkout remains clean at the locked revision.
+
+`build/m5-final-deployment-results/deployment-p0g9ne2d/report.json` records
+**41 isolated processes** with no compiler/frontend/Python/shell in their
+runtime root. All 16 executable absence probes returned ENOENT. Programs ran
+as UID 65534, with zero capabilities and no active network interface.
+Nine original FFN profiles, six optimized FFN cases, original model controls,
+two optimized bucket-model processes and standalone matmul passed.
+Source compilers and every pre-existing build/cache directory were preserved.
+The optimized model reproduced its prior outputs exactly without a JIT config.
+
+Reproduce the extended deployment gate by preparing as the workspace owner,
+then verifying the newly printed deployment directory:
+
+```bash
+python tests/deployment/verify_aot_deployment.py prepare \
+  --model-evidence build/m5-final-regression-ugtnl5aj/model/model-7pr9c5yi \
+  --ffn-evidence build/m4-runner-results/three-way-p3m7_t6e \
+  --aot-evidence build/m4-aot-results/aot-cvoknmn_ \
+  --optimized-model-evidence build/m5-p2-backend-6g14nlkn \
+  --optimized-ffn-evidence build/m5-p2-gbeyani2 \
+  --output-root build/m5-final-deployment-results
+sudo /usr/bin/python3 tests/deployment/verify_aot_deployment.py verify \
+  --deployment PATH_PRINTED_BY_PREPARE
+```
+
+Root is used only to create the namespace/chroot and drop privileges. The
+deployment gate does not remove host compilers or existing build outputs.
+
+## Paired simulator performance
+
+Evidence: `build/m5-performance-gnqqkxvb/report.json`.
+Five rounds rotate the order of five policies, with one process running at a
+time and fixed replay tokens. All use already-compiled AOT artifacts, the same
+model and member catalog, 84 member matmuls and 20 complete FFNs per run.
+Counters are deterministic across the five runs; timings are medians.
+The report includes the SHA-256 of the final runner binary.
+Process wall time includes startup, model loading and logging; VM and FFN
+timings isolate narrower execution scopes. Pipe-based process waiting avoids
+the 50 ms polling quantization seen in an earlier retained measurement.
+
+| Policy | Process ms | All VM invoke ms | FFN invoke ms | Dispatches | Instructions | Padded rows |
+|---|---:|---:|---:|---:|---:|---:|
+| Native / exact | 165.42 | 142.16 | 94.50 | 256 | 1,504,628 | 0 |
+| P1 / exact | 141.90 | 118.18 | 69.52 | 208 | 1,008,044 | 0 |
+| Native / B=8 | 350.95 | 327.79 | 280.02 | 208 | 4,058,472 | 124 |
+| P1 / B=8 | 309.49 | 287.00 | 239.00 | 208 | 3,147,732 | 124 |
+| P1 / buckets [1,8] | 142.43 | 119.09 | 71.09 | 208 | 1,000,276 | 12 |
+
+P1/exact reduces total FFN invocation time by **26.4%** on this replay.
+Its M=1 kernels improve, while its M=5 kernels regress. A single B=8
+specialization reduces the code/profile count but wastes decode work.
+Keeping decode exact with `[1,8]` avoids that penalty; in this workload it
+still takes slightly longer than P1/exact. Fewer instructions do not guarantee
+less simulator time, and fewer frontend nodes are not an acceleration result.
+
+Logical host/HAL upload/download bytes per replay are 1,088,512 / 48,128 for
+exact policies, 1,120,256 / 79,872 for B=8, and 1,091,584 / 51,200 for `[1,8]`.
+These counters do **not** measure MPACT DDR/TCM traffic, DMA overlap or physical
+hardware bandwidth. Preparation is measured separately in the P1 table above.
+All optimizations remain opt-in; no automatic profitability selector is added.
+
+Reproduce this measurement with:
+
+```bash
+python tests/ggml/benchmark_ffn_optimizations.py \
+  --native-catalog build/m4-region-model-results/model-69qio4fj/artifacts \
+  --layout-catalog build/m5-p1-bxhl8mbv/catalog \
+  --bucket-evidence build/m5-p2-gbeyani2 --repeats 5
+```
+
+## Cold compilation versus persistent hits
+
+These strace runs are separate diagnostics, not a randomized compiler benchmark.
+Initialization hashes the actual 1.3 GiB compiler library and tool closure once
+per process; it still costs about nine seconds even when no compilation occurs.
+This cost remains visible and is not included in the millisecond lookup column.
+
+| Policy | Cold compiler invocations | Cold JIT resolution s | Warm lookup ms | Warm child executions |
+|---|---:|---:|---:|---:|
+| Native / exact | 2 | 28.578 | 10.493 | 0 |
+| P1 / exact | 2 | 31.393 | 9.849 | 0 |
+| P1 / B=8 | 1 | 15.031 | 5.107 | 0 |
+
+M5 steps 4–6 are accepted within the documented F32, single-threaded,
+static-FFN scope. Shape/dtype/target/policy/compiler changes, source semantics,
+physical ABI and bucket capacities participate in validation or code identity.
+Concurrent compilation deduplication, device staging reuse, quantization and
+SoC integration remain later milestones.
+
+The final API audit also rejects invalid logical shapes **before** selecting a
+positive bucket, preventing M=0 or a negative M from being hidden by B=8.
+Five checks passed in `build/m5-final-logical-shape-test.log`. A subsequent real
+model cache hit (`build/m5-final-boundary-warm`) and the final 41-process
+deployment run use the rebuilt runtime containing this guard.
